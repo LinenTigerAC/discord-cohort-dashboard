@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Colony Field Report — Q2 2026</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#10161A;
+    --bg-raised:#171F24;
+    --bg-card:#1B252B;
+    --line:#2A363D;
+    --ink:#EDE7D9;
+    --ink-dim:#9BA8A6;
+    --ink-faint:#66746F;
+    --amber:#E8A24C;
+    --amber-dim:#8A6A3E;
+    --moss:#7FBF8F;
+    --rust:#D9705C;
+    --violet:#A091D9;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+    --serif: 'Fraunces', serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(232,162,76,0.06), transparent),
+      radial-gradient(ellipse 700px 500px at 100% 0%, rgba(160,145,217,0.05), transparent),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:48px 28px 80px;}
+
+  /* ---------- Header ---------- */
+  .masthead{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    border-bottom:1px solid var(--line);
+    padding-bottom:28px;
+    margin-bottom:36px;
+    flex-wrap:wrap;
+    gap:20px;
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--amber);
+    margin-bottom:10px;
+  }
+  h1{
+    font-family:var(--serif);
+    font-weight:600;
+    font-optical-sizing:auto;
+    font-size:42px;
+    margin:0;
+    letter-spacing:-0.01em;
+  }
+  .masthead-meta{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--ink-dim);
+    text-align:right;
+    line-height:1.7;
+  }
+  .masthead-meta b{color:var(--ink);}
+
+  /* ---------- Stat strip ---------- */
+  .stat-strip{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+    margin-bottom:44px;
+  }
+  .stat{
+    background:var(--bg-raised);
+    padding:20px 22px;
+  }
+  .stat .label{
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:8px;
+  }
+  .stat .value{
+    font-family:var(--serif);
+    font-size:28px;
+    font-weight:600;
+  }
+  .stat .sub{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-dim);
+    margin-top:4px;
+  }
+  .stat .sub.up{color:var(--moss);}
+  .stat .sub.down{color:var(--rust);}
+
+  /* ---------- Section header ---------- */
+  .section{margin-bottom:52px;}
+  .section-head{
+    display:flex;
+    align-items:baseline;
+    gap:14px;
+    margin-bottom:18px;
+  }
+  .section-num{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--amber-dim);
+  }
+  .section-head h2{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:22px;
+    margin:0;
+  }
+  .section-desc{
+    font-family:var(--sans);
+    font-size:13.5px;
+    color:var(--ink-dim);
+    margin:-10px 0 20px;
+    max-width:640px;
+  }
+
+  /* ---------- Panel ---------- */
+  .panel{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    padding:22px;
+  }
+
+  /* ---------- Cohort grid ---------- */
+  .cohort-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(230px,1fr));
+    gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+  }
+  .cohort-card{
+    background:var(--bg-card);
+    padding:16px 18px 14px;
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  .cohort-card:hover{background:#212C33;}
+  .cohort-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:6px;
+  }
+  .cohort-name{
+    font-size:13px;
+    font-weight:600;
+    color:var(--ink);
+  }
+  .cohort-pct{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-dim);
+  }
+  .cohort-count{
+    font-family:var(--serif);
+    font-size:24px;
+    font-weight:600;
+    margin:2px 0 8px;
+  }
+  .cohort-spark{width:100%;height:34px;display:block;}
+  .cohort-foot{
+    display:flex;
+    justify-content:space-between;
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--ink-faint);
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px solid var(--line);
+  }
+  .delta{font-weight:600;}
+  .delta.up{color:var(--moss);}
+  .delta.down{color:var(--rust);}
+  .delta.flat{color:var(--ink-faint);}
+
+  /* ---------- Ladder (signature element) ---------- */
+  .ladder{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .ladder-row{
+    display:grid;
+    grid-template-columns:34px 150px 1fr 85px 95px 60px;
+    align-items:center;
+    gap:14px;
+    padding:9px 16px;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-left:3px solid transparent;
+  }
+  .ladder-row .rank{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-faint);
+  }
+  .ladder-row .critter{
+    font-size:13px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .ladder-bar-track{
+    height:16px;
+    background:#0D1215;
+    border-radius:2px;
+    position:relative;
+    overflow:hidden;
+  }
+  .ladder-bar-fill{
+    height:100%;
+    background:linear-gradient(90deg, var(--amber-dim), var(--amber));
+    border-radius:2px;
+  }
+  .ladder-row .pop{
+    font-family:var(--mono);
+    font-size:12px;
+    text-align:right;
+  }
+  .ladder-row .chg{
+    font-family:var(--mono);
+    font-size:11px;
+    text-align:right;
+  }
+
+  /* ---------- Movers ---------- */
+  .movers-cols{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+  }
+  .mover-list{display:flex;flex-direction:column;gap:8px;}
+  .mover-item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:11px 14px;
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    border-left:3px solid var(--moss);
+  }
+  .mover-item.down{border-left-color:var(--rust);}
+  .mover-name{font-size:13px;font-weight:600;}
+  .mover-detail{font-family:var(--mono);font-size:11px;color:var(--ink-dim);}
+  .mover-delta{font-family:var(--mono);font-size:14px;font-weight:700;}
+  .mover-delta.up{color:var(--moss);}
+  .mover-delta.down{color:var(--rust);}
+  .col-label{
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:10px;
+  }
+
+  /* ---------- Field notes ---------- */
+  .notes-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(280px,1fr));
+    gap:16px;
+  }
+  .note-card{
+    background:var(--bg-card);
+    border:1px solid var(--line);
+    padding:20px;
+    position:relative;
+  }
+  .note-tag{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    display:inline-block;
+    margin-bottom:12px;
+    border:1px solid currentColor;
+  }
+  .note-tag.opp{color:var(--moss);}
+  .note-tag.risk{color:var(--rust);}
+  .note-tag.watch{color:var(--violet);}
+  .note-body{font-size:13.5px;color:var(--ink);line-height:1.55;}
+  .note-body b{color:var(--amber);}
+
+  /* ---------- chart containers ---------- */
+  .chart-box{position:relative;height:280px;}
+  .chart-box.short{height:200px;}
+
+  footer{
+    margin-top:60px;
+    padding-top:24px;
+    border-top:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-faint);
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-track{background:var(--bg);}
+  ::-webkit-scrollbar-thumb{background:var(--line);}
+
+  @media (max-width:800px){
+    .stat-strip{grid-template-columns:repeat(2,1fr);}
+    .movers-cols{grid-template-columns:1fr;}
+    h1{font-size:30px;}
+    .ladder-row{grid-template-columns:24px 110px 1fr 70px;gap:8px;}
+    .ladder-row .chg{display:none;}
+    .ladder-row .pop-msgs{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <div class="eyebrow">Field Report · Weekly Census</div>
+      <h1>Colony Observations, H1</h1>
+    </div>
+    <div class="masthead-meta" id="masthead-meta"></div>
+  </div>
+
+  <div class="stat-strip" id="stat-strip"></div>
+
+  <!-- 01 Census -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">01</span><h2>The Weekly Census</h2></div>
+    <div class="section-desc">Active members and message volume, tracked week over week across both quarters. The dashed marker shows where Q1 ends and Q2 begins.</div>
+    <div class="panel"><div class="chart-box"><canvas id="censusChart"></canvas></div></div>
+  </div>
+
+  <!-- 02 New vs returning -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">02</span><h2>New Arrivals vs. Regulars</h2></div>
+    <div class="section-desc">Every active member each week, split by whether it's their first appearance in the data or a repeat visit.</div>
+    <div class="panel"><div class="chart-box short"><canvas id="newRetChart"></canvas></div></div>
+  </div>
+
+  <!-- 03 Cohorts -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">03</span><h2>Cohort Ledger</h2></div>
+    <div class="section-desc">Every tracked cohort by raw member count, with median messages/week — not average, so a few hyperactive members can't inflate the read on a whole cohort. Click a card to inspect its trend line.</div>
+    <div class="cohort-grid" id="cohort-grid"></div>
+  </div>
+
+  <!-- 04 Ladder -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">04</span><h2>The Ladder</h2></div>
+    <div class="section-desc">Raw population at each rung of the leveling system — Gorilla through T-Rex — cumulative, latest week vs. quarter start.</div>
+    <div class="panel"><div class="ladder" id="ladder"></div></div>
+  </div>
+
+  <!-- 05 Funnel -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">05</span><h2>The Funnel — Where Members Get Stuck</h2></div>
+    <div class="section-desc">Animals is the first role anyone gets, so almost every member has it. What matters is who goes on to reach an actual tier, and who never does. Counts below are unique members across the full quarter, bucketed by the highest rung each person ever reached.</div>
+    <div class="stat-strip" id="funnel-callouts" style="margin-bottom:16px;"></div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:340px;"><canvas id="funnelChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:8px;">Headcount and message volume don't move together. Here's what share of the <b style="color:var(--ink)">community</b> each bucket represents, next to what share of the <b style="color:var(--amber)">quarter's total messages</b> it actually produced:</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="volumeShareChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:24px;">Of members holding the Animals role in a given week, how many still show zero tier progress that same week:</div>
+    <div class="panel"><div class="chart-box short"><canvas id="stuckTrendChart"></canvas></div></div>
+  </div>
+
+  <!-- 06 Movers -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">06</span><h2>Biggest Movers</h2></div>
+    <div class="section-desc">Cohorts with the largest membership change, latest week vs. the week prior. Raw member counts.</div>
+    <div class="movers-cols">
+      <div>
+        <div class="col-label">Gaining ground</div>
+        <div class="mover-list" id="movers-up"></div>
+      </div>
+      <div>
+        <div class="col-label">Losing ground</div>
+        <div class="mover-list" id="movers-down"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 07 Field notes -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">07</span><h2>Field Notes</h2></div>
+    <div class="section-desc">Automatically surfaced patterns worth a second look — read alongside the panels above, not instead of them.</div>
+    <div class="notes-grid" id="notes-grid"></div>
+  </div>
+
+  <!-- Cohort detail modal-ish inline panel -->
+  <div class="section" id="detail-section" style="display:none;">
+    <div class="section-head"><span class="section-num">→</span><h2 id="detail-title">Cohort detail</h2></div>
+    <div class="panel"><div class="chart-box"><canvas id="detailChart"></canvas></div></div>
+  </div>
+
+  <footer>
+    <span>Source: H1 2026 weekly export (Q1 + Q2) &middot; <span id="foot-rows"></span> rows &middot; <span id="foot-users"></span> unique members</span>
+    <span>Re-upload a fresh export any time for an updated report</span>
+  </footer>
+
+</div>
+
+<script src="./dashboard.js"></script>
+</body>
+</html>
