@@ -311,6 +311,49 @@
   .chart-box{position:relative;height:280px;}
   .chart-box.short{height:200px;}
 
+  /* ---------- Overlap heatmap ---------- */
+  .overlap-table{
+    border-collapse:collapse;
+    font-family:var(--mono);
+    font-size:11px;
+    width:100%;
+    min-width:820px;
+  }
+  .overlap-table th, .overlap-table td{
+    padding:7px 8px;
+    text-align:center;
+    border:1px solid var(--bg);
+  }
+  .overlap-table th{
+    color:var(--ink-dim);
+    font-weight:600;
+    font-size:10px;
+  }
+  .overlap-table th.row-head{
+    text-align:right;
+    color:var(--ink);
+    white-space:nowrap;
+    padding-right:12px;
+  }
+  .overlap-table th.col-head{
+    writing-mode:vertical-rl;
+    transform:rotate(180deg);
+    height:110px;
+    vertical-align:bottom;
+    white-space:nowrap;
+  }
+  .overlap-table td.diag{
+    background:var(--bg);
+    color:var(--ink-faint);
+  }
+  .overlap-table td.size-cell{
+    text-align:right;
+    color:var(--ink-faint);
+    font-size:10px;
+    padding-right:12px;
+    border:none;
+  }
+
   footer{
     margin-top:60px;
     padding-top:24px;
@@ -372,28 +415,51 @@
     <div class="cohort-grid" id="cohort-grid"></div>
   </div>
 
-  <!-- 04 Ladder -->
+  <!-- 04 Overlap -->
   <div class="section">
-    <div class="section-head"><span class="section-num">04</span><h2>The Ladder</h2></div>
+    <div class="section-head"><span class="section-num">04</span><h2>Cohort Overlap</h2></div>
+    <div class="section-desc">Are these cohorts different groups of people, or the same people wearing different labels? Each row shows what share of <b style="color:var(--ink)">that cohort's</b> members also belong to the cohort in each column — based on whether they ever held that role across the full dataset, not just the latest week. Read it row-first: "of everyone in the row cohort, X% are also in the column cohort."</div>
+    <div class="notes-grid" id="overlap-callouts" style="margin-bottom:20px;"></div>
+    <div class="panel" style="overflow-x:auto;">
+      <table class="overlap-table" id="overlap-table"></table>
+    </div>
+  </div>
+
+  <!-- 05 Ladder -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">05</span><h2>The Ladder</h2></div>
     <div class="section-desc">Raw population at each rung of the leveling system — Gorilla through T-Rex — cumulative, latest week vs. quarter start.</div>
     <div class="panel"><div class="ladder" id="ladder"></div></div>
   </div>
 
-  <!-- 05 Funnel -->
+  <!-- 06 Activation -->
   <div class="section">
-    <div class="section-head"><span class="section-num">05</span><h2>The Funnel — Where Members Get Stuck</h2></div>
-    <div class="section-desc">Animals is the first role anyone gets, so almost every member has it. What matters is who goes on to reach an actual tier, and who never does. Counts below are unique members across the full quarter, bucketed by the highest rung each person ever reached.</div>
-    <div class="stat-strip" id="funnel-callouts" style="margin-bottom:16px;"></div>
-    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:340px;"><canvas id="funnelChart"></canvas></div></div>
-    <div class="section-desc" style="margin-top:8px;">Headcount and message volume don't move together. Here's what share of the <b style="color:var(--ink)">community</b> each bucket represents, next to what share of the <b style="color:var(--amber)">quarter's total messages</b> it actually produced:</div>
-    <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="volumeShareChart"></canvas></div></div>
-    <div class="section-desc" style="margin-top:24px;">Of members holding the Animals role in a given week, how many still show zero tier progress that same week:</div>
-    <div class="panel"><div class="chart-box short"><canvas id="stuckTrendChart"></canvas></div></div>
+    <div class="section-head"><span class="section-num">06</span><h2>Activation</h2></div>
+    <div class="section-desc">Activated = sent 3+ messages in their first week in the data. This mirrors Discord's own first-day activation benchmark, but measured weekly rather than daily since that's the grain we have — treat it as a related, not identical, number. Also: this can only measure people who sent at least one message, so it's an upper bound on true server-wide activation, not a measure against your full ~430k membership.</div>
+    <div class="stat-strip" id="activation-callouts" style="margin-bottom:16px;"></div>
+    <div class="panel"><div class="chart-box short"><canvas id="activationChart"></canvas></div></div>
   </div>
 
-  <!-- 06 Movers -->
+  <!-- 06 Tier Contribution -->
   <div class="section">
-    <div class="section-head"><span class="section-num">06</span><h2>Biggest Movers</h2></div>
+    <div class="section-head"><span class="section-num">07</span><h2>Where the Messages Come From</h2></div>
+    <div class="section-desc">Every member's message volume that week, bucketed by the tier they held <b>that week</b> (not cumulative — a Tiger LVL 30 member counts only in Tiger, not in every tier below it). This is the volume-driver view: which rungs are actually carrying the conversation.</div>
+    <div class="panel"><div class="chart-box" style="height:340px;"><canvas id="tierVolumeChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:24px;">Same weeks, but messages per member in each bucket — which tier is most productive per person, not just in aggregate:</div>
+    <div class="panel"><div class="chart-box" style="height:300px;"><canvas id="tierPerCapitaChart"></canvas></div></div>
+  </div>
+
+  <!-- 07 Presence -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">08</span><h2>Member Presence — Retention &amp; Stickiness</h2></div>
+    <div class="section-desc">Of everyone who first showed up in a given week, what share are still showing up N weeks later — averaged across every cohort's start week. And separately: across the full 27 weeks, how many distinct weeks did each member show up at all.</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="retentionChart"></canvas></div></div>
+    <div class="panel"><div class="chart-box short"><canvas id="stickinessChart"></canvas></div></div>
+  </div>
+
+  <!-- 08 Movers -->
+  <div class="section">
+    <div class="section-head"><span class="section-num">09</span><h2>Biggest Movers</h2></div>
     <div class="section-desc">Cohorts with the largest membership change, latest week vs. the week prior. Raw member counts.</div>
     <div class="movers-cols">
       <div>
@@ -407,9 +473,9 @@
     </div>
   </div>
 
-  <!-- 07 Field notes -->
+  <!-- 09 Field notes -->
   <div class="section">
-    <div class="section-head"><span class="section-num">07</span><h2>Field Notes</h2></div>
+    <div class="section-head"><span class="section-num">10</span><h2>Field Notes</h2></div>
     <div class="section-desc">Automatically surfaced patterns worth a second look — read alongside the panels above, not instead of them.</div>
     <div class="notes-grid" id="notes-grid"></div>
   </div>

@@ -196,7 +196,67 @@ GRID_COHORTS.forEach(name=>{
   gridEl.appendChild(card);
 });
 
-// ---------- 04 Ladder ----------
+// ---------- 04 Cohort Overlap ----------
+const overlap = DATA.overlap;
+const ovLabels = overlap.overlap_labels;
+const ovSizes = overlap.overlap_sizes;
+const ovMatrix = overlap.overlap_matrix;
+
+function overlapColor(pct){
+  // 0% -> near background, 100% -> full amber
+  const a = Math.max(0, Math.min(1, pct/100));
+  return `rgba(232,162,76,${(a*0.85).toFixed(2)})`;
+}
+
+const table = document.getElementById('overlap-table');
+let thead = '<tr><th></th><th></th>' + ovLabels.map(l=>`<th class="col-head">${l}</th>`).join('') + '</tr>';
+let rows = ovLabels.map(r=>{
+  const cells = ovLabels.map(c=>{
+    if (c===r) return `<td class="diag">100</td>`;
+    const v = ovMatrix[r][c];
+    return `<td style="background:${overlapColor(v)};color:${v>55?'#181008':'var(--ink)'};" title="${v}% of ${r} are also ${c}">${v}</td>`;
+  }).join('');
+  return `<tr><th class="row-head">${r}</th><td class="size-cell">${fmt(ovSizes[r])}</td>${cells}</tr>`;
+}).join('');
+table.innerHTML = thead + rows;
+
+// Auto-generated callouts — skip same-family (Creator/Creator X) pairs since those overlaps are definitional, not insight.
+// Alpha Crew gets its own dedicated callout below, so exclude it here to avoid saying the same thing twice.
+function isSameFamily(a,b){ return a.startsWith('Creator') && b.startsWith('Creator'); }
+const crossPairs = [];
+ovLabels.forEach(r=>{
+  ovLabels.forEach(c=>{
+    if (r===c || isSameFamily(r,c)) return;
+    if (r==='Alpha Crew' || c==='Alpha Crew') return;
+    if (ovSizes[r] < 15) return; // skip tiny-N rows
+    crossPairs.push({ r, c, pct: ovMatrix[r][c] });
+  });
+});
+const topOverlap = [...crossPairs].sort((a,b)=>b.pct-a.pct)[0];
+const alphaCrewRow = ovLabels.includes('Alpha Crew') ? ovLabels.filter(c=>c!=='Alpha Crew' && !isSameFamily('Alpha Crew',c)).map(c=>({c, pct: ovMatrix['Alpha Crew'][c]})).sort((a,b)=>b.pct-a.pct) : [];
+
+const overlapNotes = [];
+if (topOverlap) {
+  overlapNotes.push({
+    tag:'opp', label:'Most overlapping pair',
+    body:`<b>${topOverlap.pct}%</b> of <b>${topOverlap.r}</b> members (${fmt(ovSizes[topOverlap.r])} people) are also <b>${topOverlap.c}</b>. If you're treating these as two separate levers in strategy, know that they're mostly the same audience.`
+  });
+}
+if (alphaCrewRow.length) {
+  const top3 = alphaCrewRow.slice(0,3).map(x=>`${x.pct}% ${x.c}`).join(', ');
+  overlapNotes.push({
+    tag:'watch', label:'Alpha Crew — VIP recognition tier',
+    body:`Alpha Crew (${fmt(ovSizes['Alpha Crew'])} people) is a designed recognition program, not an emergent cluster &mdash; and the overlap confirms it's pulling the right people: ${top3}. That's consistent with a tier meant to reward your most consistently engaged members across streaks, verification, and creator activity alike.`
+  });
+}
+document.getElementById('overlap-callouts').innerHTML = overlapNotes.map(n=>`
+  <div class="note-card">
+    <span class="note-tag ${n.tag}">${n.label}</span>
+    <div class="note-body">${n.body}</div>
+  </div>
+`).join('');
+
+// ---------- 05 Ladder ----------
 const ladderEl = document.getElementById('ladder');
 const maxLadderPop = Math.max(...ANIMAL_COLS.map(c=>cohorts[c][cohorts[c].length-1].members));
 ANIMAL_COLS.forEach((name, idx)=>{
@@ -222,114 +282,156 @@ ANIMAL_COLS.forEach((name, idx)=>{
   ladderEl.appendChild(row);
 });
 
-// ---------- 05 Funnel ----------
-const funnel = DATA.funnel;
-const stuckTrend = DATA.stuck_trend;
+// ---------- 06 Activation ----------
+const activation = DATA.activation;
+const DISCORD_BENCHMARK = 15;
 
-const funnelPct = n => (100*n/funnel.total_users).toFixed(1);
-document.getElementById('funnel-callouts').innerHTML = `
+document.getElementById('activation-callouts').innerHTML = `
   <div class="stat">
-    <div class="label">Ever got the Animals role</div>
-    <div class="value">${fmt(funnel.ever_animals_total)}</div>
-    <div class="sub">${funnelPct(funnel.ever_animals_total)}% of all members</div>
+    <div class="label">Overall activation rate</div>
+    <div class="value" style="color:var(--moss)">${activation.overall_rate}%</div>
+    <div class="sub">of ${fmt(activation.n_users)} message-senders, 3+ msgs in their first week</div>
   </div>
   <div class="stat">
-    <div class="label">Stuck at Animals, never leveled</div>
-    <div class="value" style="color:var(--rust)">${fmt(funnel.stuck_at_animals)}</div>
-    <div class="sub down">${(100*funnel.stuck_at_animals/funnel.ever_animals_total).toFixed(1)}% of Animals holders never leveled up</div>
+    <div class="label">Discord's benchmark</div>
+    <div class="value">${DISCORD_BENCHMARK}%</div>
+    <div class="sub">first-day, 3+ messages (their metric, not ours)</div>
   </div>
   <div class="stat">
-    <div class="label">Reached at least Gorilla LVL 1</div>
-    <div class="value" style="color:var(--moss)">${fmt(funnel.ever_animals_total - funnel.stuck_at_animals)}</div>
-    <div class="sub up">${(100*(funnel.ever_animals_total - funnel.stuck_at_animals)/funnel.ever_animals_total).toFixed(1)}% of Animals holders progressed</div>
-  </div>
-  <div class="stat">
-    <div class="label">Never got Animals at all</div>
-    <div class="value">${fmt(funnel.never_entered)}</div>
-    <div class="sub">${funnelPct(funnel.never_entered)}% of all members</div>
+    <div class="label">Vs. benchmark</div>
+    <div class="value" style="color:var(--moss)">${(activation.overall_rate - DISCORD_BENCHMARK) > 0 ? '+' : ''}${(activation.overall_rate - DISCORD_BENCHMARK).toFixed(1)}pt</div>
+    <div class="sub">among people who message at all, well above the reference point</div>
   </div>
 `;
 
-new Chart(document.getElementById('funnelChart'), {
+new Chart(document.getElementById('activationChart'), {
+  data:{
+    labels: activation.trend.map(t=>{
+      const idx = weeks.indexOf(t.week);
+      return weekLabels[idx];
+    }),
+    datasets:[
+      { type:'bar', label:'New message-senders that week', data: activation.trend.map(t=>t.new_users), backgroundColor: COLORS.inkFaint, yAxisID:'y1', order:2 },
+      { type:'line', label:'Activation rate', data: activation.trend.map(t=>t.activation_rate), borderColor: COLORS.moss, backgroundColor:'transparent', yAxisID:'y', tension:0.3, pointRadius:2, borderWidth:2, order:1 }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}} },
+    scales:{
+      x:{ grid:{display:false} },
+      y:{ position:'left', title:{display:true,text:'activation %'}, grid:{color:COLORS.line}, min:0, max:100 },
+      y1:{ position:'right', title:{display:true,text:'new message-senders'}, grid:{display:false} }
+    }
+  }
+});
+
+// ---------- 07 Tier contribution ----------
+const tc = DATA.tier_contribution;
+const tierLabels = tc.tier_bucket_labels;
+const tierPalette = ['#5C6B66', ...ANIMAL_COLS.map((_,i)=> `hsl(${30 + i*14}, 55%, ${58 - i*1.5}%)`)];
+
+new Chart(document.getElementById('tierVolumeChart'), {
   type:'bar',
   data:{
-    labels: funnel.labels,
+    labels: weekLabels,
+    datasets: tierLabels.map((label,i)=>({
+      label,
+      data: tc.weekly_tier_volume.map(w=>w[label]),
+      backgroundColor: tierPalette[i],
+      stack:'s'
+    }))
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{position:'bottom', labels:{boxWidth:9, font:{size:9.5}}} },
+    scales:{
+      x:{ stacked:true, grid:{display:false} },
+      y:{ stacked:true, title:{display:true,text:'messages/week'}, grid:{color:COLORS.line} }
+    }
+  }
+});
+
+// Per-capita: messages per member, latest week, by tier
+const latestVol = tc.weekly_tier_volume[tc.weekly_tier_volume.length-1];
+const latestMem = tc.weekly_tier_members[tc.weekly_tier_members.length-1];
+const perCapita = tierLabels.map(label => latestMem[label]>0 ? +(latestVol[label]/latestMem[label]).toFixed(1) : 0);
+
+new Chart(document.getElementById('tierPerCapitaChart'), {
+  type:'bar',
+  data:{
+    labels: tierLabels,
     datasets:[{
-      data: funnel.counts,
-      backgroundColor: funnel.labels.map((l,i)=> i===1 ? COLORS.rust : (i===0 ? COLORS.inkFaint : COLORS.amber)),
+      label:'Messages / member, latest week',
+      data: perCapita,
+      backgroundColor: tierPalette,
       borderRadius:2
     }]
   },
   options:{
-    indexAxis:'y',
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxRotation:60, minRotation:60, font:{size:10}} },
+      y:{ title:{display:true,text:'messages/member'}, grid:{color:COLORS.line} }
+    }
+  }
+});
+
+// ---------- 08 Presence: retention & stickiness ----------
+const retentionCurve = DATA.retention_curve;
+new Chart(document.getElementById('retentionChart'), {
+  type:'line',
+  data:{
+    labels: retentionCurve.map(r=>`+${r.offset}wk`),
+    datasets:[{
+      label:'% of first-week cohort still active',
+      data: retentionCurve.map(r=>r.pct),
+      borderColor: COLORS.amber, backgroundColor:'rgba(232,162,76,0.08)',
+      fill:true, tension:0.25, pointRadius:2, borderWidth:2
+    }]
+  },
+  options:{
     responsive:true, maintainAspectRatio:false,
     plugins:{ legend:{display:false},
-      tooltip:{ callbacks:{ label: (ctx)=>`${fmt(ctx.parsed.x)} members (${(100*ctx.parsed.x/funnel.total_users).toFixed(1)}%)` } }
+      tooltip:{ callbacks:{ afterLabel:(ctx)=>`n=${fmt(retentionCurve[ctx.dataIndex].n)} in this cohort` } }
     },
     scales:{
-      x:{ grid:{color:COLORS.line}, title:{display:true,text:'unique members, highest rung ever reached'} },
-      y:{ grid:{display:false} }
+      x:{ grid:{display:false}, title:{display:true,text:'weeks since first appearance'} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'% still active'}, min:0, max:100 }
     }
   }
 });
 
-// Member share vs message-volume share, by funnel bucket — the headline asymmetry
-const mb = funnel.msg_buckets;
-const bucketDefs = [
-  { label:'Never got Animals', members: funnel.never_entered, msgs: mb.never_entered_msgs, color: COLORS.inkFaint },
-  { label:'Stuck at Animals', members: funnel.stuck_at_animals, msgs: mb.stuck_msgs, color: COLORS.rust },
-  { label:'Reached a tier', members: funnel.ever_animals_total - funnel.stuck_at_animals, msgs: mb.leveled_msgs, color: COLORS.moss }
-];
-new Chart(document.getElementById('volumeShareChart'), {
+const stickyHist = DATA.stickiness_hist;
+new Chart(document.getElementById('stickinessChart'), {
   type:'bar',
   data:{
-    labels: bucketDefs.map(b=>b.label),
-    datasets:[
-      { label:'% of members', data: bucketDefs.map(b=>+(100*b.members/funnel.total_users).toFixed(1)), backgroundColor: COLORS.inkDim },
-      { label:'% of total messages, full period', data: bucketDefs.map(b=>+(100*b.msgs/funnel.total_all_msgs).toFixed(1)), backgroundColor: COLORS.amber }
-    ]
-  },
-  options:{
-    indexAxis:'y',
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
-      tooltip:{ callbacks:{ afterLabel: (ctx)=>{
-        const b = bucketDefs[ctx.dataIndex];
-        return ctx.datasetIndex===0 ? `${fmt(b.members)} members` : `${fmt(b.msgs)} messages, full period`;
-      }}}
-    },
-    scales:{
-      x:{ grid:{color:COLORS.line}, title:{display:true,text:'% share'}, max:100 },
-      y:{ grid:{display:false} }
-    }
-  }
-});
-
-new Chart(document.getElementById('stuckTrendChart'), {
-  type:'bar',
-  data:{
-    labels: weekLabels,
-    datasets:[
-      { label:'Stuck at Animals (no tier yet)', data: stuckTrend.map(s=>s.stuck_count), backgroundColor: COLORS.rust, yAxisID:'y' },
-      { label:'Has at least one tier', data: stuckTrend.map(s=>s.animals_holders - s.stuck_count), backgroundColor: COLORS.moss, yAxisID:'y' }
-    ]
+    labels: stickyHist.map(s=>s.label),
+    datasets:[{
+      label:'Unique members',
+      data: stickyHist.map(s=>s.count),
+      backgroundColor: COLORS.violet,
+      borderRadius:2
+    }]
   },
   options:{
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
-      tooltip:{ callbacks:{ afterBody: (items)=>{
-        const idx = items[0].dataIndex;
-        return `${stuckTrend[idx].stuck_pct}% of this week's Animals holders have no tier yet`;
+    plugins:{ legend:{display:false},
+      tooltip:{ callbacks:{ afterLabel:(ctx)=>{
+        const total = stickyHist.reduce((a,s)=>a+s.count,0);
+        return `${(100*stickyHist[ctx.dataIndex].count/total).toFixed(1)}% of all members`;
       }}}
     },
     scales:{
-      x:{ stacked:true, grid:{display:false} },
-      y:{ stacked:true, grid:{color:COLORS.line} }
+      x:{ grid:{display:false}, title:{display:true,text:'distinct weeks active, out of 27'} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'members'} }
     }
   }
 });
 
-// ---------- 06 Movers ----------
+// ---------- 09 Movers ----------
 const ALL_COHORT_NAMES = Object.keys(cohorts);
 const wowDeltas = ALL_COHORT_NAMES.map(name=>{
   const s = cohorts[name];
@@ -360,7 +462,7 @@ function renderMovers(container, list, positive){
 renderMovers(document.getElementById('movers-up'), gainers, true);
 renderMovers(document.getElementById('movers-down'), losers, false);
 
-// ---------- 06 Field notes (auto-generated) ----------
+// ---------- 10 Field notes (auto-generated) ----------
 function fourWeekMomentum(name){
   const s = cohorts[name];
   const n = s.length;
@@ -394,10 +496,44 @@ const ladderMomentum = ANIMAL_COLS.map(name=>{
 
 const notes = [];
 
+// Top volume-driving tier, latest week (excluding tiny-N tiers)
+const latestTierEntries = tierLabels
+  .map(label => ({ label, vol: latestVol[label], mem: latestMem[label] }))
+  .filter(t => t.mem >= 10);
+const topVolumeTier = [...latestTierEntries].sort((a,b)=>b.vol-a.vol)[0];
+const topPerCapitaTier = [...latestTierEntries]
+  .map(t=>({...t, perCap: t.vol/t.mem}))
+  .sort((a,b)=>b.perCap-a.perCap)[0];
+
+if (topVolumeTier) {
+  notes.push({
+    tag:'opp', label:'Where the volume comes from',
+    body:`<b>${topVolumeTier.label}</b> produced the most messages of any single tier this week (<b>${fmt(topVolumeTier.vol)}</b> messages from ${fmt(topVolumeTier.mem)} members). ${topPerCapitaTier && topPerCapitaTier.label !== topVolumeTier.label ? `Per member, though, <b>${topPerCapitaTier.label}</b> is the most productive tier at ${topPerCapitaTier.perCap.toFixed(1)} messages/member.` : ''}`
+  });
+}
+
 notes.push({
-  tag:'risk', label:'The big one',
-  body:`<b>${fmt(funnel.stuck_at_animals)}</b> members (${(100*funnel.stuck_at_animals/funnel.ever_animals_total).toFixed(1)}% of everyone who's ever held the Animals role) have never reached a single tier on the ladder. That's half the community stopping at the entry role &mdash; but they only account for <b>${(100*funnel.msg_buckets.stuck_msgs/funnel.total_all_msgs).toFixed(1)}%</b> of the period's ${fmt(funnel.total_all_msgs)} total messages (${fmt(funnel.msg_buckets.stuck_msgs)} messages). Headcount-wise this is a huge group; volume-wise it's a much smaller lever. See the Funnel section for the full split.`
+  tag:'watch', label:'Activation',
+  body:`<b>${activation.overall_rate}%</b> of message-senders hit 3+ messages in their first week &mdash; well above Discord's ${DISCORD_BENCHMARK}% first-day benchmark, though this is measured against people who message at all, not your full member base. Worth checking whether that gap is real strength in onboarding or just a measurement difference (weekly window vs. their daily one).`
 });
+
+const week1Ret = retentionCurve.find(r=>r.offset===1);
+const week8Ret = retentionCurve.find(r=>r.offset===8);
+if (week1Ret && week8Ret) {
+  notes.push({
+    tag:'risk', label:'Early drop-off',
+    body:`Of members active in their first week, only <b>${week1Ret.pct}%</b> are still active the following week, falling to <b>${week8Ret.pct}%</b> by 8 weeks out. Most of the drop happens immediately &mdash; if there's a lever for retention, it's likely in week one, not week eight.`
+  });
+}
+
+const oneWeekOnly = stickyHist.find(s=>s.label==='1 wks' || s.label==='1 wk');
+if (oneWeekOnly) {
+  const totalSticky = stickyHist.reduce((a,s)=>a+s.count,0);
+  notes.push({
+    tag:'watch', label:'One-and-done',
+    body:`<b>${fmt(oneWeekOnly.count)}</b> members (${(100*oneWeekOnly.count/totalSticky).toFixed(1)}% of everyone in the data) show up in exactly one week out of 27 and never again. That's a meaningfully different group from the ones who churn gradually &mdash; likely worth its own outreach approach.`
+  });
+}
 
 notes.push({
   tag:'watch', label:'Community pulse',
@@ -435,7 +571,7 @@ if (laggingGrowth) {
 if (ladderMomentum) {
   notes.push({
     tag:'watch', label:'Ladder movement',
-    body:`<b>${ANIMAL_EMOJI[ladderMomentum.name]} ${ladderMomentum.name}</b> saw the largest population gain on the leveling ladder across H1 (${ladderMomentum.gain>=0?'+':''}${ladderMomentum.gain} members). Since ranks are cumulative, this is a reasonable proxy for where members are spending time leveling up right now &mdash; though as the Funnel section shows, most people never get this far at all.`
+    body:`<b>${ANIMAL_EMOJI[ladderMomentum.name]} ${ladderMomentum.name}</b> saw the largest population gain on the leveling ladder across H1 (${ladderMomentum.gain>=0?'+':''}${ladderMomentum.gain} members). Since ranks are cumulative, this is a reasonable proxy for where members are spending time leveling up right now.`
   });
 }
 
