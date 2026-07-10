@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Colony Field Report — Q2 2026</title>
+<title>Animal Company — Field Report</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -354,6 +354,61 @@
     border:none;
   }
 
+  /* ---------- Section nav ---------- */
+  .section-nav{
+    position:sticky;
+    top:0;
+    z-index:20;
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+    align-items:center;
+    background:rgba(16,22,26,0.92);
+    backdrop-filter:blur(6px);
+    border:1px solid var(--line);
+    padding:10px 14px;
+    margin-bottom:36px;
+  }
+  .section-nav a{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-dim);
+    text-decoration:none;
+    padding:5px 10px;
+    border-radius:2px;
+    white-space:nowrap;
+    transition:background .15s ease, color .15s ease;
+  }
+  .section-nav a:hover{ background:var(--bg-card); color:var(--amber); }
+  .section-nav-divider{
+    width:1px;
+    height:16px;
+    background:var(--line);
+    margin:0 4px;
+  }
+
+  /* ---------- Collapsible sections ---------- */
+  .collapsible-head{
+    cursor:pointer;
+    user-select:none;
+    justify-content:space-between;
+  }
+  .collapsible-head:hover h2{ color:var(--amber); }
+  .collapse-icon{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--ink-faint);
+    margin-left:auto;
+    transition:transform .15s ease;
+  }
+  .collapsible-body{ display:none; }
+  .collapsible-hint{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--ink-faint);
+    margin:-10px 0 18px;
+  }
+
   footer{
     margin-top:60px;
     padding-top:24px;
@@ -387,58 +442,55 @@
   <div class="masthead">
     <div>
       <div class="eyebrow">Field Report · Weekly Census</div>
-      <h1>Colony Observations, H1</h1>
+      <h1>Animal Company</h1>
     </div>
     <div class="masthead-meta" id="masthead-meta"></div>
   </div>
 
   <div class="stat-strip" id="stat-strip"></div>
 
-  <!-- YoY hero section -->
-  <div class="section" id="yoy-section">
-    <div class="section-head"><span class="section-num">★</span><h2>One Year in Review — The Turnaround</h2></div>
-    <div class="section-desc">Full history back to January 2025, corrected for a Statbot export cap that undercounted 26 weeks (marked with *), and flagged for one week of confirmed data loss (marked with †). See the note below the chart for details on both.</div>
-    <div class="notes-grid" id="yoy-narrative-callouts" style="margin-bottom:20px;"></div>
-    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:320px;"><canvas id="yoyFullHistoryChart"></canvas></div></div>
-    <div class="section-desc" style="margin-top:8px;">Same calendar week, one year apart. Because early-to-mid 2025 was an inflated, viral-driven peak that later collapsed, comparing against it will mostly show a decline — that's the artificial 2025 baseline, not a problem with current performance. The "growth since the trough" numbers above are the fairer read.</div>
-    <div class="panel" style="overflow-x:auto;"><table class="overlap-table" id="yoy-comparison-table" style="min-width:0;"></table></div>
-    <div class="section-desc" style="margin-top:24px;">The leveling ladder existed the whole time, so its growth is a clean one-year comparison with no caveats needed:</div>
-    <div class="panel"><div class="chart-box short"><canvas id="yoyLadderChart"></canvas></div></div>
-  </div>
-
-  <!-- Membership churn -->
-  <div class="section" id="churn-section">
-    <div class="section-head"><span class="section-num">★</span><h2>Membership Churn — Are We Actually Keeping People?</h2></div>
-    <div class="section-desc">This section uses Discord's own official membership ledger (joins/leaves), not the Statbot messaging export — an independent check on everything above. Standing membership is estimated by cumulative net change, anchored to the current known total of 442,034.</div>
-    <div class="notes-grid" id="churn-callouts" style="margin-bottom:20px;"></div>
-    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:280px;"><canvas id="churnJoinsLeavesChart"></canvas></div></div>
-    <div class="section-desc" style="margin-top:8px;">The naive "leaves as a % of that week's joins" ratio is misleading here — when joins collapse, that ratio rises even if nobody's actually leaving more. The fairer number is leaves as a % of the whole standing membership:</div>
-    <div class="panel"><div class="chart-box short"><canvas id="churnRateChart"></canvas></div></div>
-  </div>
+  <nav class="section-nav">
+    <a href="#sec-census">This Week</a>
+    <a href="#sec-newret">New vs Regulars</a>
+    <a href="#sec-cohorts">Cohorts</a>
+    <a href="#sec-overlap">Overlap</a>
+    <a href="#sec-ladder">Ladder</a>
+    <a href="#sec-activation">Activation</a>
+    <a href="#sec-tier">Message Sources</a>
+    <a href="#sec-presence">Presence</a>
+    <a href="#sec-movers">Movers</a>
+    <a href="#sec-notes">Field Notes</a>
+    <span class="section-nav-divider"></span>
+    <a href="#yoy-section">Year in Review</a>
+    <a href="#churn-section">Churn</a>
+    <a href="#eventlog-section">Event Log</a>
+  </nav>
 
   <!-- 01 Census -->
-  <div class="section">
+  <div class="section" id="sec-census">
     <div class="section-head"><span class="section-num">01</span><h2>The Weekly Census</h2></div>
-    <div class="section-desc">Active members and message volume, tracked week over week across both quarters. The dashed marker shows where Q1 ends and Q2 begins.</div>
-    <div class="panel"><div class="chart-box"><canvas id="censusChart"></canvas></div></div>
+    <div class="section-desc">Active members (solid) and total message volume (dashed), tracked week over week. The dashed vertical marker shows where Q1 ends and Q2 begins.</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box"><canvas id="censusChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:8px;">Headcount and volume can both grow just because more people showed up. This is the depth read instead — median messages sent per active member, per week — so a bigger crowd that's individually quieter doesn't get mistaken for a more engaged one:</div>
+    <div class="panel"><div class="chart-box short"><canvas id="depthChart"></canvas></div></div>
   </div>
 
   <!-- 02 New vs returning -->
-  <div class="section">
+  <div class="section" id="sec-newret">
     <div class="section-head"><span class="section-num">02</span><h2>New Arrivals vs. Regulars</h2></div>
     <div class="section-desc">Every active member each week, split by whether it's their first appearance in the data or a repeat visit.</div>
     <div class="panel"><div class="chart-box short"><canvas id="newRetChart"></canvas></div></div>
   </div>
 
   <!-- 03 Cohorts -->
-  <div class="section">
+  <div class="section" id="sec-cohorts">
     <div class="section-head"><span class="section-num">03</span><h2>Cohort Ledger</h2></div>
     <div class="section-desc">Every tracked cohort by raw member count, with median messages/week — not average, so a few hyperactive members can't inflate the read on a whole cohort. Click a card to inspect its trend line.</div>
     <div class="cohort-grid" id="cohort-grid"></div>
   </div>
 
   <!-- 04 Overlap -->
-  <div class="section">
+  <div class="section" id="sec-overlap">
     <div class="section-head"><span class="section-num">04</span><h2>Cohort Overlap</h2></div>
     <div class="section-desc">Are these cohorts different groups of people, or the same people wearing different labels? Each row shows what share of <b style="color:var(--ink)">that cohort's</b> members also belong to the cohort in each column — based on whether they ever held that role across the full dataset, not just the latest week. Read it row-first: "of everyone in the row cohort, X% are also in the column cohort."</div>
     <div class="notes-grid" id="overlap-callouts" style="margin-bottom:20px;"></div>
@@ -448,14 +500,14 @@
   </div>
 
   <!-- 05 Ladder -->
-  <div class="section">
+  <div class="section" id="sec-ladder">
     <div class="section-head"><span class="section-num">05</span><h2>The Ladder</h2></div>
     <div class="section-desc">Raw population at each rung of the leveling system — Gorilla through T-Rex — cumulative, latest week vs. quarter start.</div>
     <div class="panel"><div class="ladder" id="ladder"></div></div>
   </div>
 
   <!-- 06 Activation -->
-  <div class="section">
+  <div class="section" id="sec-activation">
     <div class="section-head"><span class="section-num">06</span><h2>Activation</h2></div>
     <div class="section-desc">Activated = sent 3+ messages in their first week in the data. This mirrors Discord's own first-day activation benchmark, but measured weekly rather than daily since that's the grain we have — treat it as a related, not identical, number. Also: this can only measure people who sent at least one message, so it's an upper bound on true server-wide activation, not a measure against your full ~430k membership.</div>
     <div class="stat-strip" id="activation-callouts" style="margin-bottom:16px;"></div>
@@ -463,7 +515,7 @@
   </div>
 
   <!-- 06 Tier Contribution -->
-  <div class="section">
+  <div class="section" id="sec-tier">
     <div class="section-head"><span class="section-num">07</span><h2>Where the Messages Come From</h2></div>
     <div class="section-desc">Every member's message volume that week, bucketed by the tier they held <b>that week</b> (not cumulative — a Tiger LVL 30 member counts only in Tiger, not in every tier below it). "Animals only (no tier)" means they have the entry role but haven't reached Gorilla LVL 1 yet; "No role at all" means they don't even have Animals. This is the volume-driver view: which rungs are actually carrying the conversation.</div>
     <div class="panel"><div class="chart-box" style="height:340px;"><canvas id="tierVolumeChart"></canvas></div></div>
@@ -472,7 +524,7 @@
   </div>
 
   <!-- 07 Presence -->
-  <div class="section">
+  <div class="section" id="sec-presence">
     <div class="section-head"><span class="section-num">08</span><h2>Member Presence — Retention &amp; Stickiness</h2></div>
     <div class="section-desc">Does retention actually differ for members who joined before vs. after the November 2025 shift in community management? Each line follows its own cohort from their first appearance forward — not a snapshot, an actual trajectory.</div>
     <div class="notes-grid" id="prepost-retention-callout" style="margin-bottom:16px;"></div>
@@ -482,7 +534,7 @@
   </div>
 
   <!-- 08 Movers -->
-  <div class="section">
+  <div class="section" id="sec-movers">
     <div class="section-head"><span class="section-num">09</span><h2>Biggest Movers</h2></div>
     <div class="section-desc">Cohorts with the largest membership change, latest week vs. the week prior. Raw member counts.</div>
     <div class="movers-cols">
@@ -498,10 +550,57 @@
   </div>
 
   <!-- 09 Field notes -->
-  <div class="section">
+  <div class="section" id="sec-notes">
     <div class="section-head"><span class="section-num">10</span><h2>Field Notes</h2></div>
     <div class="section-desc">Automatically surfaced patterns worth a second look — read alongside the panels above, not instead of them.</div>
     <div class="notes-grid" id="notes-grid"></div>
+  </div>
+
+  <!-- YoY hero section (collapsed by default -- deep history, not weekly-actionable) -->
+  <div class="section" id="yoy-section">
+    <div class="section-head collapsible-head" onclick="toggleSection('yoy-body', this)">
+      <span class="section-num">★</span><h2>One Year in Review — The Turnaround</h2>
+      <span class="collapse-icon">▸ expand</span>
+    </div>
+    <div class="collapsible-body" id="yoy-body">
+      <div class="section-desc">Full history back to January 2025, corrected for a Statbot export cap that undercounted 26 weeks (marked with *), and flagged for one week of confirmed data loss (marked with †). See the note below the chart for details on both.</div>
+      <div class="section-desc" style="margin-top:-6px;">The small dots along the bottom of the chart mark real events — <span style="color:var(--moss)">●</span> program launches, <span style="color:var(--violet)">●</span> feature launches, <span style="color:var(--amber)">●</span> milestones, <span style="color:var(--rust)">●</span> leadership/incidents, <span style="color:var(--ink-dim)">●</span> application cycles &amp; game updates. Hover any dot for what it was. Full list in the Event Log at the bottom of the page.</div>
+      <div class="notes-grid" id="yoy-narrative-callouts" style="margin-bottom:20px;"></div>
+      <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:320px;"><canvas id="yoyFullHistoryChart"></canvas></div></div>
+      <div class="section-desc" style="margin-top:24px;">And the depth side of the same story — median messages per active member, per week. Note: for the 26 corrected weeks (*), this line is <b>not</b> corrected the way active-member counts are — we only have an aggregate override for headcount and total volume, not the underlying per-user rows, so the median for those weeks is computed from the partial (capped) data only and should be read as approximate.</div>
+      <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="yoyDepthChart"></canvas></div></div>
+      <div class="section-desc" style="margin-top:24px;">Same calendar week, one year apart, active members and depth side by side. Because early-to-mid 2025 was an inflated, viral-driven peak that later collapsed, comparing against it will mostly show a decline on the active-members side — that's the artificial 2025 baseline, not a problem with current performance. The "growth since the trough" numbers above are the fairer read for headcount. Depth tends to move less dramatically, since it's already normalized per person.</div>
+      <div class="panel" style="overflow-x:auto;"><table class="overlap-table" id="yoy-comparison-table" style="min-width:0;"></table></div>
+      <div class="section-desc" style="margin-top:24px;">The leveling ladder existed the whole time, so its growth is a clean one-year comparison with no caveats needed:</div>
+      <div class="panel"><div class="chart-box short"><canvas id="yoyLadderChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- Membership churn (collapsed by default -- deep history, not weekly-actionable) -->
+  <div class="section" id="churn-section">
+    <div class="section-head collapsible-head" onclick="toggleSection('churn-body', this)">
+      <span class="section-num">★</span><h2>Membership Churn — Are We Actually Keeping People?</h2>
+      <span class="collapse-icon">▸ expand</span>
+    </div>
+    <div class="collapsible-body" id="churn-body">
+      <div class="section-desc">This section uses Discord's own official membership ledger (joins/leaves), not the Statbot messaging export — an independent check on everything above. Standing membership is estimated by cumulative net change, anchored to the current known total of 442,034.</div>
+      <div class="notes-grid" id="churn-callouts" style="margin-bottom:20px;"></div>
+      <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:280px;"><canvas id="churnJoinsLeavesChart"></canvas></div></div>
+      <div class="section-desc" style="margin-top:8px;">The naive "leaves as a % of that week's joins" ratio is misleading here — when joins collapse, that ratio rises even if nobody's actually leaving more. The fairer number is leaves as a % of the whole standing membership:</div>
+      <div class="panel"><div class="chart-box short"><canvas id="churnRateChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="section" id="eventlog-section">
+    <div class="section-head collapsible-head" onclick="toggleSection('eventlog-body', this)">
+      <span class="section-num">★</span><h2>Event Log — What Happened, When</h2>
+      <span class="collapse-icon">▸ expand</span>
+    </div>
+    <div class="collapsible-body" id="eventlog-body">
+      <div class="section-desc">Pulled from the Discord-updates, release-notes, and announcements channels. Major updates, feature launches, program announcements, and application cycles — chronological, most recent first.</div>
+      <div class="panel" style="overflow-x:auto;"><table class="overlap-table" id="eventlog-table" style="min-width:0;"></table></div>
+    </div>
   </div>
 
   <!-- Cohort detail modal-ish inline panel -->

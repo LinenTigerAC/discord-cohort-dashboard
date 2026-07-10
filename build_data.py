@@ -30,6 +30,13 @@ Optional: --membership-csv joins_leaves.csv --current-members 442034
     rate rather than a joins-distorted one). If this file isn't provided,
     the Membership Churn section is simply omitted from the dashboard.
 
+Optional: --events-csv events.csv
+    Adds the Event Log section and timeline markers, from a CSV with columns:
+    date, category, title, description. Category should be one of:
+    program_launch, feature_launch, milestone, application_cycle, game_update,
+    leadership, incident. See curated_events.csv for the existing list --
+    add new rows to it as new events happen and re-pass it each week.
+
 Requirements: pip install pandas
 """
 import sys, json
@@ -50,7 +57,7 @@ DATA_LOSS_WEEKS = ['2026-06-22']
 # The community-management cutoff used for the pre/post narrative stats.
 NARRATIVE_CUTOFF = '2025-11-03'
 
-def main(csv_paths, corrections_path=None, membership_csv_path=None, current_members=None):
+def main(csv_paths, corrections_path=None, membership_csv_path=None, current_members=None, events_csv_path=None):
     if not csv_paths:
         print("Usage: python3 build_data.py export1.csv [export2.csv ...] [--corrections corrections.csv] "
               "[--membership-csv joins_leaves.csv --current-members 442034]")
@@ -220,7 +227,8 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
     # ---------- Year-over-year: full weekly history, corrected + flagged ----------
     weekly_base = df.groupby('Week Start').agg(
         active_users=('Discord ID', 'nunique'),
-        total_messages=('Weekly Messages', 'sum')
+        total_messages=('Weekly Messages', 'sum'),
+        median_messages=('Weekly Messages', 'median')
     ).reset_index().sort_values('Week Start')
 
     corrections_map_users, corrections_map_msgs = {}, {}
@@ -243,14 +251,20 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         w = r['Week Start']
         active_final = corrections_map_users.get(w, int(r['active_users']))
         msgs_final = corrections_map_msgs.get(w, int(r['total_messages']))
+        # Note: median_messages is NOT corrected for capped weeks -- we only have an aggregate
+        # override for active_users/total_messages, not the underlying per-user rows, so the
+        # median for those 26 weeks is computed from the partial (capped) row set only. Flagged
+        # the same is_corrected way so the dashboard can caveat it rather than presenting it as exact.
+        median_val = float(r['median_messages'])
         is_corrected = w in corrections_map_users
         is_data_loss = w in data_loss_dates
-        weekly_final[w] = {'active': active_final, 'msgs': msgs_final}
+        weekly_final[w] = {'active': active_final, 'msgs': msgs_final, 'median': median_val}
         full_history.append({
             "week": w.strftime('%Y-%m-%d'),
             "week_label": w.strftime('%b %-d, %Y'),
             "active_users": active_final,
             "total_messages": msgs_final,
+            "median_messages": median_val,
             "is_corrected": bool(is_corrected),
             "is_data_loss": bool(is_data_loss)
         })
@@ -271,6 +285,8 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
             "pct_change_active": round(100*(cur['active']-pri['active'])/pri['active'],1) if pri['active'] else None,
             "current_messages": cur['msgs'], "prior_messages": pri['msgs'],
             "pct_change_messages": round(100*(cur['msgs']-pri['msgs'])/pri['msgs'],1) if pri['msgs'] else None,
+            "current_median": cur['median'], "prior_median": pri['median'],
+            "pct_change_median": round(100*(cur['median']-pri['median'])/pri['median'],1) if pri['median'] else None,
             "current_is_corrected": w in corrections_map_users,
             "current_is_data_loss": w in data_loss_dates,
             "prior_is_corrected": prior in corrections_map_users
@@ -362,6 +378,20 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
                         "anchored to the provided current total. Leading all-zero rows excluded."
             }
 
+    # ---------- Curated events (optional) ----------
+    events_out = []
+    if events_csv_path:
+        ev_df = pd.read_csv(events_csv_path)
+        ev_df['date'] = pd.to_datetime(ev_df['date'])
+        for _, r in ev_df.sort_values('date').iterrows():
+            events_out.append({
+                "date": r['date'].strftime('%Y-%m-%d'),
+                "date_label": r['date'].strftime('%b %-d, %Y'),
+                "category": r['category'],
+                "title": r['title'],
+                "description": r['description']
+            })
+
     output = {
         "meta": {
             "total_rows": len(df),
@@ -398,7 +428,8 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
             "ladder_cols": ANIMAL_COLS,
             "narrative_stats": narrative_stats
         },
-        "membership_churn": membership_churn
+        "membership_churn": membership_churn,
+        "events": events_out
     }
 
     with open('data.json', 'w') as f:
@@ -422,7 +453,9 @@ if __name__ == '__main__':
     corrections_arg, args = pop_flag('--corrections', args)
     membership_csv_arg, args = pop_flag('--membership-csv', args)
     current_members_arg, args = pop_flag('--current-members', args)
+    events_csv_arg, args = pop_flag('--events-csv', args)
     current_members_arg = int(current_members_arg) if current_members_arg else None
 
     main(args, corrections_path=corrections_arg,
-         membership_csv_path=membership_csv_arg, current_members=current_members_arg)
+         membership_csv_path=membership_csv_arg, current_members=current_members_arg,
+         events_csv_path=events_csv_arg)

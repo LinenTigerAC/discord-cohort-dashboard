@@ -1,3 +1,22 @@
+// Toggle for collapsible sections (Year in Review, Membership Churn) --
+// defined at top level (not inside initDashboard) so the inline onclick
+// handlers work immediately, independent of data-loading timing.
+window.toggleSection = function(bodyId, headEl){
+  const body = document.getElementById(bodyId);
+  const icon = headEl.querySelector('.collapse-icon');
+  const isHidden = body.style.display !== 'block';
+  body.style.display = isHidden ? 'block' : 'none';
+  if (icon) icon.textContent = isHidden ? '▾ collapse' : '▸ expand';
+  if (isHidden) {
+    // charts initialized while this container was display:none often need a manual
+    // resize the first time they become visible, since Chart.js measured a 0x0 box.
+    body.querySelectorAll('canvas').forEach(canvas => {
+      const chart = Chart.getChart(canvas);
+      if (chart) chart.resize();
+    });
+  }
+};
+
 async function initDashboard(){
   let DATA;
   try {
@@ -117,19 +136,98 @@ const yoyBoundaryPlugin = {
   }
 };
 
+// Event markers: map each curated event to its nearest week index in fh, for overlay
+const events = DATA.events || [];
+const EVENT_COLORS = {
+  program_launch: COLORS.moss,
+  feature_launch: COLORS.violet,
+  milestone: COLORS.amber,
+  application_cycle: COLORS.inkDim,
+  game_update: COLORS.inkFaint,
+  leadership: COLORS.rust,
+  incident: COLORS.rust
+};
+const fhDates = fh.map(w => new Date(w.week).getTime());
+function nearestFhIndex(dateStr){
+  const t = new Date(dateStr).getTime();
+  let best = 0, bestDiff = Infinity;
+  fhDates.forEach((d,i)=>{ const diff = Math.abs(d-t); if (diff<bestDiff){bestDiff=diff; best=i;} });
+  // only place a marker if within ~4 days of an actual week start, else event predates chart range
+  return bestDiff <= 4*86400000 ? best : null;
+}
+const eventMarkers = events.map(e => ({ ...e, idx: nearestFhIndex(e.date) })).filter(e => e.idx !== null);
+
 new Chart(document.getElementById('yoyFullHistoryChart'), {
   type:'line',
   plugins: [yoyBoundaryPlugin],
   data:{
     labels: fh.map(w=>w.week_label),
+    datasets:[
+      {
+        label:'Active members/week',
+        data: fh.map(w=>w.active_users),
+        borderColor: COLORS.amber,
+        backgroundColor: 'rgba(232,162,76,0.06)',
+        fill: true, tension:0.25, borderWidth:2,
+        pointRadius: fh.map(w => (w.is_corrected || w.is_data_loss) ? 3 : 0),
+        pointBackgroundColor: fh.map(w => w.is_data_loss ? COLORS.inkFaint : (w.is_corrected ? COLORS.violet : COLORS.amber)),
+        yAxisID: 'y'
+      },
+      {
+        label:'Events',
+        type:'scatter',
+        data: eventMarkers.map(e => ({ x: e.idx, y: 0.5 })),
+        pointBackgroundColor: eventMarkers.map(e => EVENT_COLORS[e.category] || COLORS.inkDim),
+        pointBorderColor: 'transparent',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        yAxisID: 'yEvents',
+        showLine: false
+      }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{display:false},
+      tooltip:{ callbacks:{
+        label: (ctx) => {
+          if (ctx.datasetIndex === 1) {
+            const e = eventMarkers[ctx.dataIndex];
+            return `${e.date_label}: ${e.title}`;
+          }
+          return `Active members: ${fmt(ctx.parsed.y)}`;
+        },
+        afterLabel: (ctx)=>{
+          if (ctx.datasetIndex === 1) return '';
+          const w = fh[ctx.dataIndex];
+          if (w.is_data_loss) return '† Statbot outage — real number was higher';
+          if (w.is_corrected) return '* Export cap corrected to true value';
+          return '';
+        }
+      }}
+    },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxTicksLimit:12} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'active members'} },
+      yEvents:{ display:false, min:0, max:1 }
+    }
+  }
+});
+
+new Chart(document.getElementById('yoyDepthChart'), {
+  type:'line',
+  plugins: [yoyBoundaryPlugin],
+  data:{
+    labels: fh.map(w=>w.week_label),
     datasets:[{
-      label:'Active members/week',
-      data: fh.map(w=>w.active_users),
-      borderColor: COLORS.amber,
-      backgroundColor: 'rgba(232,162,76,0.06)',
+      label:'Median messages/active member',
+      data: fh.map(w=>w.median_messages),
+      borderColor: COLORS.moss,
+      backgroundColor: 'rgba(127,191,143,0.06)',
       fill: true, tension:0.25, borderWidth:2,
-      pointRadius: fh.map(w => (w.is_corrected || w.is_data_loss) ? 3 : 0),
-      pointBackgroundColor: fh.map(w => w.is_data_loss ? COLORS.inkFaint : (w.is_corrected ? COLORS.violet : COLORS.amber)),
+      pointRadius: fh.map(w => w.is_corrected ? 3 : 0),
+      pointBackgroundColor: COLORS.violet,
     }]
   },
   options:{
@@ -138,14 +236,13 @@ new Chart(document.getElementById('yoyFullHistoryChart'), {
       legend:{display:false},
       tooltip:{ callbacks:{ afterLabel: (ctx)=>{
         const w = fh[ctx.dataIndex];
-        if (w.is_data_loss) return '† Statbot outage — real number was higher';
-        if (w.is_corrected) return '* Export cap corrected to true value';
+        if (w.is_corrected) return '* Headcount corrected this week, but this median is from partial data only';
         return '';
       }}}
     },
     scales:{
       x:{ grid:{display:false}, ticks:{maxTicksLimit:12} },
-      y:{ grid:{color:COLORS.line}, title:{display:true,text:'active members'} }
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'median messages/week'} }
     }
   }
 });
@@ -156,9 +253,12 @@ const yoyTable = document.getElementById('yoy-comparison-table');
 yoyTable.innerHTML = `
   <tr>
     <th class="row-head" style="text-align:left;">Week</th>
-    <th>This year</th>
-    <th>Same week, last year</th>
-    <th>Change</th>
+    <th>Active, this year</th>
+    <th>Active, last year</th>
+    <th>Active change</th>
+    <th>Depth, this year</th>
+    <th>Depth, last year</th>
+    <th>Depth change</th>
   </tr>
   ${recentPairs.map(p => `
     <tr>
@@ -166,6 +266,9 @@ yoyTable.innerHTML = `
       <td>${fmt(p.current_active)}</td>
       <td>${fmt(p.prior_active)}${p.prior_is_corrected?' *':''}</td>
       <td style="color:${p.pct_change_active>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_active>=0?'+':''}${p.pct_change_active}%</td>
+      <td>${fmt1(p.current_median)}</td>
+      <td>${fmt1(p.prior_median)}${p.prior_is_corrected?' *':''}</td>
+      <td style="color:${p.pct_change_median>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_median>=0?'+':''}${p.pct_change_median}%</td>
     </tr>
   `).join('')}
 `;
@@ -285,6 +388,31 @@ new Chart(document.getElementById('churnRateChart'), {
 });
 }
 
+// ---------- Event Log ----------
+const CATEGORY_LABELS = {
+  program_launch: 'Program launch',
+  feature_launch: 'Feature launch',
+  milestone: 'Milestone',
+  application_cycle: 'Applications',
+  game_update: 'Game update',
+  leadership: 'Leadership',
+  incident: 'Incident'
+};
+if (events.length) {
+  const sortedEvents = [...events].sort((a,b) => new Date(b.date) - new Date(a.date));
+  const eventLogTable = document.getElementById('eventlog-table');
+  eventLogTable.innerHTML = `
+    <tr><th class="row-head" style="text-align:left;">Date</th><th style="text-align:left;">Category</th><th style="text-align:left;">Event</th></tr>
+    ${sortedEvents.map(e => `
+      <tr>
+        <td style="text-align:left;color:var(--ink-dim);white-space:nowrap;">${e.date_label}</td>
+        <td style="text-align:left;"><span style="color:${EVENT_COLORS[e.category]||COLORS.inkDim};">●</span> ${CATEGORY_LABELS[e.category]||e.category}</td>
+        <td style="text-align:left;color:var(--ink);" title="${e.description}">${e.title}</td>
+      </tr>
+    `).join('')}
+  `;
+}
+
 // ---------- 01 Census chart ----------
 const boundaryIdx = weeks.indexOf(DATA.meta.quarter_boundary_week);
 const quarterMarkerPlugin = {
@@ -339,6 +467,29 @@ new Chart(document.getElementById('censusChart'), {
       x:{ grid:{color:COLORS.line} },
       y:{ position:'left', title:{display:true,text:'active members'}, grid:{color:COLORS.line} },
       y1:{ position:'right', title:{display:true,text:'messages'}, grid:{display:false} }
+    }
+  }
+});
+
+// ---------- Depth of engagement (median messages/active member) ----------
+new Chart(document.getElementById('depthChart'), {
+  type:'line',
+  plugins: boundaryIdx>=0 ? [quarterMarkerPlugin] : [],
+  data:{
+    labels: weekLabels,
+    datasets:[{
+      label:'Median messages / active member',
+      data: overall.map(w=>w.median_messages),
+      borderColor: COLORS.moss, backgroundColor:'rgba(127,191,143,0.08)',
+      fill:true, tension:0.3, pointRadius:2, borderWidth:2
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{color:COLORS.line} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'median messages/week'} }
     }
   }
 });
