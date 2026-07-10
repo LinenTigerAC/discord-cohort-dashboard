@@ -136,7 +136,10 @@ const yoyBoundaryPlugin = {
   }
 };
 
-// Event markers: map each curated event to its nearest week index in fh, for overlay
+// Event markers: map each curated event to its nearest week index in fh, for overlay.
+// IMPORTANT: built as a parallel array the same length as fh (one slot per category-axis
+// tick), not as {x,y} scatter points -- mixing a numeric-x scatter dataset with a
+// category-axis line chart caused events to render shifted to the wrong year entirely.
 const events = DATA.events || [];
 const EVENT_COLORS = {
   program_launch: COLORS.moss,
@@ -155,7 +158,19 @@ function nearestFhIndex(dateStr){
   // only place a marker if within ~4 days of an actual week start, else event predates chart range
   return bestDiff <= 4*86400000 ? best : null;
 }
-const eventMarkers = events.map(e => ({ ...e, idx: nearestFhIndex(e.date) })).filter(e => e.idx !== null);
+const eventsByIndex = {};
+events.forEach(e => {
+  const idx = nearestFhIndex(e.date);
+  if (idx === null) return;
+  if (!eventsByIndex[idx]) eventsByIndex[idx] = [];
+  eventsByIndex[idx].push(e);
+});
+const eventMarkerData = fh.map((w,i) => eventsByIndex[i] ? 0.5 : null);
+const eventMarkerColors = fh.map((w,i) => {
+  const evs = eventsByIndex[i];
+  if (!evs) return 'transparent';
+  return EVENT_COLORS[evs[0].category] || COLORS.inkDim;
+});
 
 new Chart(document.getElementById('yoyFullHistoryChart'), {
   type:'line',
@@ -175,14 +190,14 @@ new Chart(document.getElementById('yoyFullHistoryChart'), {
       },
       {
         label:'Events',
-        type:'scatter',
-        data: eventMarkers.map(e => ({ x: e.idx, y: 0.5 })),
-        pointBackgroundColor: eventMarkers.map(e => EVENT_COLORS[e.category] || COLORS.inkDim),
+        type:'line',
+        data: eventMarkerData,
+        showLine: false,
+        pointRadius: eventMarkerData.map(v => v===null ? 0 : 4),
+        pointHoverRadius: eventMarkerData.map(v => v===null ? 0 : 6),
+        pointBackgroundColor: eventMarkerColors,
         pointBorderColor: 'transparent',
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        yAxisID: 'yEvents',
-        showLine: false
+        yAxisID: 'yEvents'
       }
     ]
   },
@@ -193,8 +208,8 @@ new Chart(document.getElementById('yoyFullHistoryChart'), {
       tooltip:{ callbacks:{
         label: (ctx) => {
           if (ctx.datasetIndex === 1) {
-            const e = eventMarkers[ctx.dataIndex];
-            return `${e.date_label}: ${e.title}`;
+            const evs = eventsByIndex[ctx.dataIndex] || [];
+            return evs.map(e => `${e.date_label}: ${e.title}`);
           }
           return `Active members: ${fmt(ctx.parsed.y)}`;
         },
@@ -215,38 +230,6 @@ new Chart(document.getElementById('yoyFullHistoryChart'), {
   }
 });
 
-new Chart(document.getElementById('yoyDepthChart'), {
-  type:'line',
-  plugins: [yoyBoundaryPlugin],
-  data:{
-    labels: fh.map(w=>w.week_label),
-    datasets:[{
-      label:'Median messages/active member',
-      data: fh.map(w=>w.median_messages),
-      borderColor: COLORS.moss,
-      backgroundColor: 'rgba(127,191,143,0.06)',
-      fill: true, tension:0.25, borderWidth:2,
-      pointRadius: fh.map(w => w.is_corrected ? 3 : 0),
-      pointBackgroundColor: COLORS.violet,
-    }]
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{
-      legend:{display:false},
-      tooltip:{ callbacks:{ afterLabel: (ctx)=>{
-        const w = fh[ctx.dataIndex];
-        if (w.is_corrected) return '* Headcount corrected this week, but this median is from partial data only';
-        return '';
-      }}}
-    },
-    scales:{
-      x:{ grid:{display:false}, ticks:{maxTicksLimit:12} },
-      y:{ grid:{color:COLORS.line}, title:{display:true,text:'median messages/week'} }
-    }
-  }
-});
-
 // YoY comparison table -- most recent 10 matched weeks, to keep it readable
 const recentPairs = yoyData.yoy_pairs.slice(-10);
 const yoyTable = document.getElementById('yoy-comparison-table');
@@ -256,9 +239,9 @@ yoyTable.innerHTML = `
     <th>Active, this year</th>
     <th>Active, last year</th>
     <th>Active change</th>
-    <th>Depth, this year</th>
-    <th>Depth, last year</th>
-    <th>Depth change</th>
+    <th>Messages, this year</th>
+    <th>Messages, last year</th>
+    <th>Messages change</th>
   </tr>
   ${recentPairs.map(p => `
     <tr>
@@ -266,9 +249,9 @@ yoyTable.innerHTML = `
       <td>${fmt(p.current_active)}</td>
       <td>${fmt(p.prior_active)}${p.prior_is_corrected?' *':''}</td>
       <td style="color:${p.pct_change_active>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_active>=0?'+':''}${p.pct_change_active}%</td>
-      <td>${fmt1(p.current_median)}</td>
-      <td>${fmt1(p.prior_median)}${p.prior_is_corrected?' *':''}</td>
-      <td style="color:${p.pct_change_median>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_median>=0?'+':''}${p.pct_change_median}%</td>
+      <td>${fmt(p.current_messages)}</td>
+      <td>${fmt(p.prior_messages)}${p.prior_is_corrected?' *':''}</td>
+      <td style="color:${p.pct_change_messages>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_messages>=0?'+':''}${p.pct_change_messages}%</td>
     </tr>
   `).join('')}
 `;
@@ -413,7 +396,7 @@ if (events.length) {
   `;
 }
 
-// ---------- 01 Census chart ----------
+// ---------- 01 Census chart (+ Nov-onward / All-time range toggle) ----------
 const boundaryIdx = weeks.indexOf(DATA.meta.quarter_boundary_week);
 const quarterMarkerPlugin = {
   id: 'quarterMarker',
@@ -439,80 +422,153 @@ const quarterMarkerPlugin = {
   }
 };
 
-new Chart(document.getElementById('censusChart'), {
-  type:'line',
-  plugins: boundaryIdx>=0 ? [quarterMarkerPlugin] : [],
-  data:{
-    labels: weekLabels,
-    datasets:[
-      {
-        label:'Active members',
-        data: overall.map(w=>w.active_users),
-        borderColor: COLORS.amber, backgroundColor:'rgba(232,162,76,0.08)',
-        yAxisID:'y', tension:0.3, fill:true, pointRadius:2, borderWidth:2
+const narrativeCutoff = DATA.meta.narrative_cutoff;
+const novOnwardStartIdx = Math.max(0, weeks.indexOf(narrativeCutoff));
+
+function sliceForRange(range){
+  return range === 'nov' ? novOnwardStartIdx : 0;
+}
+
+let censusChartInstance = null, depthChartInstance = null, newRetChartInstance = null;
+
+function renderCensusChart(range){
+  const startIdx = sliceForRange(range);
+  const labels = weekLabels.slice(startIdx);
+  const data = overall.slice(startIdx);
+  const localBoundaryIdx = boundaryIdx - startIdx;
+  if (censusChartInstance) censusChartInstance.destroy();
+  censusChartInstance = new Chart(document.getElementById('censusChart'), {
+    type:'line',
+    plugins: (boundaryIdx>=startIdx) ? [{ ...quarterMarkerPlugin, afterDraw(chart){
+      if (localBoundaryIdx < 0) return;
+      const xScale = chart.scales.x;
+      const x = xScale.getPixelForValue(localBoundaryIdx);
+      const {top, bottom} = chart.chartArea;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = COLORS.inkFaint;
+      ctx.setLineDash([4,3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = COLORS.inkFaint;
+      ctx.font = "10px 'JetBrains Mono'";
+      ctx.fillText('Q2 starts', x+5, top+11);
+      ctx.restore();
+    }}] : [],
+    data:{
+      labels,
+      datasets:[
+        {
+          label:'Active members',
+          data: data.map(w=>w.active_users),
+          borderColor: COLORS.amber, backgroundColor:'rgba(232,162,76,0.08)',
+          yAxisID:'y', tension:0.3, fill:true, borderWidth:2,
+          pointRadius: data.map(w => (w.is_corrected || w.is_data_loss) ? 3 : 0),
+          pointBackgroundColor: data.map(w => w.is_data_loss ? COLORS.inkFaint : (w.is_corrected ? COLORS.violet : COLORS.amber))
+        },
+        {
+          label:'Total messages',
+          data: data.map(w=>w.total_messages),
+          borderColor: COLORS.violet, backgroundColor:'transparent',
+          yAxisID:'y1', tension:0.3, pointRadius:2, borderWidth:2, borderDash:[4,3]
+        }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
+        tooltip:{ callbacks:{ afterBody: (items)=>{
+          const w = data[items[0].dataIndex];
+          if (w.is_data_loss) return '† Statbot outage — real number was higher';
+          if (w.is_corrected) return '* Export cap corrected to true value';
+          return '';
+        }}}
       },
-      {
-        label:'Total messages',
-        data: overall.map(w=>w.total_messages),
-        borderColor: COLORS.violet, backgroundColor:'transparent',
-        yAxisID:'y1', tension:0.3, pointRadius:2, borderWidth:2, borderDash:[4,3]
+      scales:{
+        x:{ grid:{color:COLORS.line} },
+        y:{ position:'left', title:{display:true,text:'active members'}, grid:{color:COLORS.line} },
+        y1:{ position:'right', title:{display:true,text:'messages'}, grid:{display:false} }
       }
-    ]
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    interaction:{mode:'index', intersect:false},
-    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}} },
-    scales:{
-      x:{ grid:{color:COLORS.line} },
-      y:{ position:'left', title:{display:true,text:'active members'}, grid:{color:COLORS.line} },
-      y1:{ position:'right', title:{display:true,text:'messages'}, grid:{display:false} }
     }
-  }
-});
+  });
+}
 
-// ---------- Depth of engagement (median messages/active member) ----------
-new Chart(document.getElementById('depthChart'), {
-  type:'line',
-  plugins: boundaryIdx>=0 ? [quarterMarkerPlugin] : [],
-  data:{
-    labels: weekLabels,
-    datasets:[{
-      label:'Median messages / active member',
-      data: overall.map(w=>w.median_messages),
-      borderColor: COLORS.moss, backgroundColor:'rgba(127,191,143,0.08)',
-      fill:true, tension:0.3, pointRadius:2, borderWidth:2
-    }]
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:false} },
-    scales:{
-      x:{ grid:{color:COLORS.line} },
-      y:{ grid:{color:COLORS.line}, title:{display:true,text:'median messages/week'} }
+function renderDepthChart(range){
+  const startIdx = sliceForRange(range);
+  const labels = weekLabels.slice(startIdx);
+  const data = overall.slice(startIdx);
+  if (depthChartInstance) depthChartInstance.destroy();
+  depthChartInstance = new Chart(document.getElementById('depthChart'), {
+    type:'line',
+    data:{
+      labels,
+      datasets:[{
+        label:'Median messages / active member',
+        data: data.map(w=>w.median_messages),
+        borderColor: COLORS.moss, backgroundColor:'rgba(127,191,143,0.08)',
+        fill:true, tension:0.3, pointRadius:2, borderWidth:2
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ grid:{color:COLORS.line} },
+        y:{ grid:{color:COLORS.line}, title:{display:true,text:'median messages/week'} }
+      }
     }
-  }
-});
+  });
+}
 
-// ---------- 02 New vs returning ----------
-new Chart(document.getElementById('newRetChart'), {
-  type:'bar',
-  data:{
-    labels: weekLabels,
-    datasets:[
-      { label:'Returning', data:newRet.map(w=>w.returning_users), backgroundColor: COLORS.amberDim, stack:'s' },
-      { label:'New', data:newRet.map(w=>w.new_users), backgroundColor: COLORS.moss, stack:'s' }
-    ]
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}} },
-    scales:{
-      x:{ stacked:true, grid:{display:false} },
-      y:{ stacked:true, grid:{color:COLORS.line} }
+function renderNewRetChart(range){
+  const startIdx = sliceForRange(range);
+  const labels = weekLabels.slice(startIdx);
+  const data = newRet.slice(startIdx);
+  if (newRetChartInstance) newRetChartInstance.destroy();
+  newRetChartInstance = new Chart(document.getElementById('newRetChart'), {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        { label:'Returning', data:data.map(w=>w.returning_users), backgroundColor: COLORS.amberDim, stack:'s' },
+        { label:'New', data:data.map(w=>w.new_users), backgroundColor: COLORS.moss, stack:'s' }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}} },
+      scales:{
+        x:{ stacked:true, grid:{display:false} },
+        y:{ stacked:true, grid:{color:COLORS.line} }
+      }
     }
-  }
-});
+  });
+}
+
+function wireRangeToggle(containerId, onRangeChange){
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      onRangeChange(btn.dataset.range);
+    });
+  });
+}
+
+renderCensusChart('nov');
+renderDepthChart('nov');
+wireRangeToggle('census-range-toggle', (range) => { renderCensusChart(range); renderDepthChart(range); });
+
+// ---------- 02 New vs returning (+ range toggle) ----------
+renderNewRetChart('nov');
+wireRangeToggle('newret-range-toggle', (range) => renderNewRetChart(range));
 
 // ---------- sparkline helper ----------
 function sparkline(values, w=200, h=34, color=COLORS.amber){
@@ -618,51 +674,14 @@ document.getElementById('overlap-callouts').innerHTML = overlapNotes.map(n=>`
   </div>
 `).join('');
 
-// ---------- 05 Ladder ----------
-const ladderEl = document.getElementById('ladder');
-const maxLadderPop = Math.max(...ANIMAL_COLS.map(c=>cohorts[c][cohorts[c].length-1].members));
-ANIMAL_COLS.forEach((name, idx)=>{
-  const series = cohorts[name];
-  const latest = series[series.length-1];
-  const first = series[0];
-  const chg = latest.members - first.members;
-  const chgClass = chg>0?'up':(chg<0?'down':'flat');
-  const pct = maxLadderPop>0 ? (latest.members/maxLadderPop*100) : 0;
-  const row = document.createElement('div');
-  row.className = 'ladder-row';
-  row.style.borderLeftColor = idx===ANIMAL_COLS.length-1 ? COLORS.amber : 'transparent';
-  row.innerHTML = `
-    <div class="rank">${String(idx+1).padStart(2,'0')}</div>
-    <div class="critter">${ANIMAL_EMOJI[name]} ${name}</div>
-    <div class="ladder-bar-track"><div class="ladder-bar-fill" style="width:${pct}%"></div></div>
-    <div class="pop">${fmt(latest.members)}<span style="color:var(--ink-faint);font-size:10px;"> mem</span></div>
-    <div class="pop pop-msgs">${fmt(latest.total_msgs_member)}<span style="color:var(--ink-faint);font-size:10px;"> msgs</span></div>
-    <div class="chg delta ${chgClass}">${chg>0?'+':''}${chg}</div>
-  `;
-  row.addEventListener('click', ()=>showDetail(name));
-  row.style.cursor='pointer';
-  ladderEl.appendChild(row);
-});
-
-// ---------- 06 Activation ----------
+// ---------- 05 Activation ----------
 const activation = DATA.activation;
-const DISCORD_BENCHMARK = 15;
 
 document.getElementById('activation-callouts').innerHTML = `
   <div class="stat">
-    <div class="label">Overall activation rate</div>
+    <div class="label">Activation rate, Nov 2025 onward</div>
     <div class="value" style="color:var(--moss)">${activation.overall_rate}%</div>
     <div class="sub">of ${fmt(activation.n_users)} message-senders, 3+ msgs in their first week</div>
-  </div>
-  <div class="stat">
-    <div class="label">Discord's benchmark</div>
-    <div class="value">${DISCORD_BENCHMARK}%</div>
-    <div class="sub">first-day, 3+ messages (their metric, not ours)</div>
-  </div>
-  <div class="stat">
-    <div class="label">Vs. benchmark</div>
-    <div class="value" style="color:var(--moss)">${(activation.overall_rate - DISCORD_BENCHMARK) > 0 ? '+' : ''}${(activation.overall_rate - DISCORD_BENCHMARK).toFixed(1)}pt</div>
-    <div class="sub">among people who message at all, well above the reference point</div>
   </div>
 `;
 
@@ -689,115 +708,43 @@ new Chart(document.getElementById('activationChart'), {
   }
 });
 
-// ---------- 07 Tier contribution ----------
+// ---------- 06 Tier contribution ----------
 const tc = DATA.tier_contribution;
 const tierLabels = tc.tier_bucket_labels;
 const tierPalette = ['#3A4248', '#5C6B66', ...ANIMAL_COLS.map((_,i)=> `hsl(${30 + i*14}, 55%, ${58 - i*1.5}%)`)];
 
+// Latest week vs previous week only -- a stacked 27-week chart across 18 tiers is unreadable,
+// and a simple two-week comparison actually answers "where do the messages come from" better.
+const latestVol = tc.weekly_tier_volume[tc.weekly_tier_volume.length-1];
+const latestMem = tc.weekly_tier_members[tc.weekly_tier_members.length-1];
+const prevVol = tc.weekly_tier_volume[tc.weekly_tier_volume.length-2];
+const prevWeekLabel = weekLabels[weekLabels.length-2];
+const latestWeekLabel = weekLabels[weekLabels.length-1];
+
 new Chart(document.getElementById('tierVolumeChart'), {
   type:'bar',
   data:{
-    labels: weekLabels,
-    datasets: tierLabels.map((label,i)=>({
-      label,
-      data: tc.weekly_tier_volume.map(w=>w[label]),
-      backgroundColor: tierPalette[i],
-      stack:'s'
-    }))
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{position:'bottom', labels:{boxWidth:9, font:{size:9.5}}} },
-    scales:{
-      x:{ stacked:true, grid:{display:false} },
-      y:{ stacked:true, title:{display:true,text:'messages/week'}, grid:{color:COLORS.line} }
-    }
-  }
-});
-
-// Per-capita: messages per member, latest week, by tier
-const latestVol = tc.weekly_tier_volume[tc.weekly_tier_volume.length-1];
-const latestMem = tc.weekly_tier_members[tc.weekly_tier_members.length-1];
-const perCapita = tierLabels.map(label => latestMem[label]>0 ? +(latestVol[label]/latestMem[label]).toFixed(1) : 0);
-
-new Chart(document.getElementById('tierPerCapitaChart'), {
-  type:'bar',
-  data:{
     labels: tierLabels,
-    datasets:[{
-      label:'Messages / member, latest week',
-      data: perCapita,
-      backgroundColor: tierPalette,
-      borderRadius:2
-    }]
-  },
-  options:{
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:false} },
-    scales:{
-      x:{ grid:{display:false}, ticks:{maxRotation:60, minRotation:60, font:{size:10}} },
-      y:{ title:{display:true,text:'messages/member'}, grid:{color:COLORS.line} }
-    }
-  }
-});
-
-// ---------- 08 Presence: pre/post-Nov retention & stickiness ----------
-const prepostRet = DATA.prepost_retention;
-const preCurve = prepostRet.pre_curve, postCurve = prepostRet.post_curve;
-
-// summary stat for the callout: avg retention across offsets 1-12 (solid sample size on both sides)
-const avgRange = [1,12];
-function avgPct(curve){
-  const inRange = curve.filter(r=>r.offset>=avgRange[0] && r.offset<=avgRange[1]);
-  return inRange.reduce((a,r)=>a+r.pct,0)/inRange.length;
-}
-const preAvg = avgPct(preCurve), postAvg = avgPct(postCurve);
-const retDiff = postAvg - preAvg;
-
-document.getElementById('prepost-retention-callout').innerHTML = `
-  <div class="note-card">
-    <span class="note-tag watch">Individual retention, weeks 1-12 average</span>
-    <div class="note-body">Members who joined <b>before</b> Nov 3, 2025: <b>${preAvg.toFixed(1)}%</b> average retention.
-    Members who joined <b>on/after</b> Nov 3, 2025: <b>${postAvg.toFixed(1)}%</b> average retention.
-    A real but modest improvement (${retDiff>=0?'+':''}${retDiff.toFixed(1)}pt, ${(100*retDiff/preAvg).toFixed(1)}% relative) &mdash;
-    much smaller than the swing in aggregate weekly headcount stability shown above. That suggests the community-level
-    steadiness is more about a more consistent flow of new members each week than dramatically stickier individual behavior.</div>
-  </div>
-`;
-
-// build a shared label set out to the longer of the two curves
-const maxOffset = Math.max(preCurve.length, postCurve.length) - 1;
-const offsetLabels = Array.from({length: maxOffset+1}, (_,i)=>`+${i}wk`);
-const preByOffset = Object.fromEntries(preCurve.map(r=>[r.offset, r.pct]));
-const postByOffset = Object.fromEntries(postCurve.map(r=>[r.offset, r.pct]));
-
-new Chart(document.getElementById('prepostRetentionChart'), {
-  type:'line',
-  data:{
-    labels: offsetLabels,
     datasets:[
-      { label:'Joined before Nov 3, 2025', data: offsetLabels.map((_,i)=>preByOffset[i] ?? null),
-        borderColor: COLORS.inkFaint, backgroundColor:'transparent', tension:0.25, pointRadius:2, borderWidth:2, borderDash:[4,3] },
-      { label:'Joined on/after Nov 3, 2025', data: offsetLabels.map((_,i)=>postByOffset[i] ?? null),
-        borderColor: COLORS.moss, backgroundColor:'rgba(127,191,143,0.08)', fill:true, tension:0.25, pointRadius:2, borderWidth:2 }
+      { label: prevWeekLabel, data: tierLabels.map(l=>prevVol[l]), backgroundColor: COLORS.inkFaint, borderRadius:2 },
+      { label: latestWeekLabel, data: tierLabels.map(l=>latestVol[l]), backgroundColor: COLORS.amber, borderRadius:2 }
     ]
   },
   options:{
+    indexAxis:'y',
     responsive:true, maintainAspectRatio:false,
-    interaction:{mode:'index', intersect:false},
-    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
-      tooltip:{ callbacks:{ afterBody:(items)=>{
-        const idx = items[0].dataIndex;
-        const preN = preCurve[idx]?.n, postN = postCurve[idx]?.n;
-        return [`n=${preN?fmt(preN):'—'} (pre) / ${postN?fmt(postN):'—'} (post)`];
-      }}}
-    },
+    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}} },
     scales:{
-      x:{ grid:{display:false}, title:{display:true,text:'weeks since first appearance'} },
-      y:{ grid:{color:COLORS.line}, title:{display:true,text:'% still active'}, min:0, max:100 }
+      x:{ grid:{color:COLORS.line}, title:{display:true,text:'messages that week'} },
+      y:{ grid:{display:false} }
     }
   }
 });
+
+// ---------- Pre/post-Nov retention data (chart retired -- merged into Membership Churn's story;
+// kept here only because Field Notes below still references postCurve for the drop-off stat) ----------
+const prepostRet = DATA.prepost_retention;
+const preCurve = prepostRet.pre_curve, postCurve = prepostRet.post_curve;
 
 const stickyHist = DATA.stickiness_hist;
 new Chart(document.getElementById('stickinessChart'), {
@@ -820,15 +767,17 @@ new Chart(document.getElementById('stickinessChart'), {
       }}}
     },
     scales:{
-      x:{ grid:{display:false}, title:{display:true,text:'distinct weeks active, out of 27'} },
+      x:{ grid:{display:false}, title:{display:true,text:`distinct weeks active, out of ${weeks.length}`} },
       y:{ grid:{color:COLORS.line}, title:{display:true,text:'members'} }
     }
   }
 });
 
-// ---------- 09 Movers ----------
-const ALL_COHORT_NAMES = Object.keys(cohorts);
-const wowDeltas = ALL_COHORT_NAMES.map(name=>{
+// ---------- 07 Movers ----------
+// Restricted to named recognition cohorts only -- the base ladder (Animals, Gorilla, Cat, etc.)
+// is excluded since the early rungs take as few as 10 messages to cross and dominate any
+// "biggest mover" list by default, without that meaning much.
+const wowDeltas = GRID_COHORTS.map(name=>{
   const s = cohorts[name];
   const latest = s[s.length-1], prev = s[s.length-2];
   return {
@@ -857,7 +806,7 @@ function renderMovers(container, list, positive){
 renderMovers(document.getElementById('movers-up'), gainers, true);
 renderMovers(document.getElementById('movers-down'), losers, false);
 
-// ---------- 10 Field notes (auto-generated) ----------
+// ---------- 08 Field notes (auto-generated) ----------
 function fourWeekMomentum(name){
   const s = cohorts[name];
   const n = s.length;
@@ -910,7 +859,7 @@ if (topVolumeTier) {
 
 notes.push({
   tag:'watch', label:'Activation',
-  body:`<b>${activation.overall_rate}%</b> of message-senders hit 3+ messages in their first week &mdash; well above Discord's ${DISCORD_BENCHMARK}% first-day benchmark, though this is measured against people who message at all, not your full member base. Worth checking whether that gap is real strength in onboarding or just a measurement difference (weekly window vs. their daily one).`
+  body:`<b>${activation.overall_rate}%</b> of message-senders hit 3+ messages in their first week, measured Nov 2025 onward &mdash; though this is measured against people who message at all, not your full member base, so treat it as an upper bound rather than a true server-wide rate.`
 });
 
 const week1Ret = postCurve.find(r=>r.offset===1);
@@ -918,7 +867,7 @@ const week8Ret = postCurve.find(r=>r.offset===8);
 if (week1Ret && week8Ret) {
   notes.push({
     tag:'risk', label:'Early drop-off',
-    body:`Even in the post-November cohort, only <b>${week1Ret.pct}%</b> of members active in their first week are still active the following week, falling to <b>${week8Ret.pct}%</b> by 8 weeks out. Most of the drop happens immediately &mdash; if there's a lever for retention, it's likely in week one, not week eight. The community-management shift improved this only modestly (see Member Presence above) &mdash; early drop-off is still the biggest single pattern in the data.`
+    body:`Even in the post-November cohort, only <b>${week1Ret.pct}%</b> of members active in their first week are still active the following week, falling to <b>${week8Ret.pct}%</b> by 8 weeks out. Most of the drop happens immediately &mdash; if there's a lever for retention, it's likely in week one, not week eight. The community-management shift improved this only modestly (see Membership Churn &amp; Stickiness below) &mdash; early drop-off is still the biggest single pattern in the data.`
   });
 }
 

@@ -93,15 +93,35 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
     animal_level_num = {c: i for i, c in enumerate(ANIMAL_COLS)}
     df['any_tier'] = df[ANIMAL_COLS].any(axis=1)
 
+    # Load corrections early so they can be applied to BOTH the main `overall` series
+    # (used by the live Weekly Census etc.) and the YoY full_history series below --
+    # previously only the latter got corrected, which left the main dashboard showing
+    # the raw, export-capped ~10,000 plateau for 26 historical weeks.
+    corrections_map_users, corrections_map_msgs = {}, {}
+    if corrections_path:
+        corr_df = pd.read_csv(corrections_path)
+        corr_df['week_start'] = pd.to_datetime(corr_df['week_start'])
+        for _, r in corr_df.iterrows():
+            if pd.notna(r.get('true_active_users')) and str(r['true_active_users']).strip() != '':
+                corrections_map_users[r['week_start']] = int(r['true_active_users'])
+            if pd.notna(r.get('true_total_messages')) and str(r['true_total_messages']).strip() != '':
+                val = str(r['true_total_messages']).replace(',', '')
+                corrections_map_msgs[r['week_start']] = int(val)
+    data_loss_dates_early = set(pd.to_datetime(DATA_LOSS_WEEKS))
+
     overall, cohort_weekly = [], {c: [] for c in COHORT_COLS}
     for w in weeks:
         wdf = df[df['Week Start'] == w]
         active = len(wdf)
+        active_final = corrections_map_users.get(w, int(active))
+        msgs_final = corrections_map_msgs.get(w, int(wdf['Weekly Messages'].sum()))
         overall.append({
             "week": w.strftime('%Y-%m-%d'),
-            "active_users": int(active),
-            "total_messages": int(wdf['Weekly Messages'].sum()),
-            "median_messages": float(wdf['Weekly Messages'].median()) if active else 0
+            "active_users": active_final,
+            "total_messages": msgs_final,
+            "median_messages": float(wdf['Weekly Messages'].median()) if active else 0,
+            "is_corrected": bool(w in corrections_map_users),
+            "is_data_loss": bool(w in data_loss_dates_early)
         })
         for c in COHORT_COLS:
             members = wdf[wdf[c] == True]
@@ -140,15 +160,24 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         weekly_tier_members.append(mem_row)
 
     # ---------- activation: 3+ messages in first appearance week ----------
+    # Restricted to the Nov 2025-onward era, since that's the relevant period to judge
+    # current activation against -- mixing in the pre-strategy-shift era muddies the read.
     week_idx_map = {w: i for i, w in enumerate(weeks)}
     df['week_idx'] = df['Week Start'].map(week_idx_map)
     first_seen_idx = df.groupby('Discord ID')['week_idx'].min().to_dict()
     df['is_first_week'] = df.apply(lambda r: first_seen_idx[r['Discord ID']] == r['week_idx'], axis=1)
-    first_week_rows = df[df['is_first_week']].drop_duplicates(subset=['Discord ID'])
-    overall_activation_rate = round(100 * (first_week_rows['Weekly Messages'] >= 3).mean(), 1)
+    narrative_cutoff_idx = week_idx_map.get(pd.Timestamp(NARRATIVE_CUTOFF))
+    first_week_rows_all = df[df['is_first_week']].drop_duplicates(subset=['Discord ID'])
+    if narrative_cutoff_idx is not None:
+        first_week_rows = first_week_rows_all[first_week_rows_all['week_idx'] >= narrative_cutoff_idx]
+    else:
+        first_week_rows = first_week_rows_all
+    overall_activation_rate = round(100 * (first_week_rows['Weekly Messages'] >= 3).mean(), 1) if len(first_week_rows) else 0
     activation_trend = []
     for w_i, w in enumerate(weeks):
-        cohort = first_week_rows[first_week_rows['week_idx'] == w_i]
+        if narrative_cutoff_idx is not None and w_i < narrative_cutoff_idx:
+            continue
+        cohort = first_week_rows_all[first_week_rows_all['week_idx'] == w_i]
         n = len(cohort)
         rate = round(100 * (cohort['Weekly Messages'] >= 3).mean(), 1) if n > 0 else None
         activation_trend.append({"week": w.strftime('%Y-%m-%d'), "new_users": int(n), "activation_rate": rate})
@@ -204,7 +233,9 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         new_vs_returning.append({
             "week": w.strftime('%Y-%m-%d'),
             "new_users": int(wdf['is_new_this_week'].sum()),
-            "returning_users": int((~wdf['is_new_this_week']).sum())
+            "returning_users": int((~wdf['is_new_this_week']).sum()),
+            "is_corrected": bool(w in corrections_map_users),
+            "is_data_loss": bool(w in data_loss_dates_early)
         })
 
     # ---------- cohort overlap (ever-true membership across full dataset) ----------
@@ -231,17 +262,7 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         median_messages=('Weekly Messages', 'median')
     ).reset_index().sort_values('Week Start')
 
-    corrections_map_users, corrections_map_msgs = {}, {}
-    if corrections_path:
-        corr_df = pd.read_csv(corrections_path)
-        corr_df['week_start'] = pd.to_datetime(corr_df['week_start'])
-        for _, r in corr_df.iterrows():
-            if pd.notna(r.get('true_active_users')) and str(r['true_active_users']).strip() != '':
-                corrections_map_users[r['week_start']] = int(r['true_active_users'])
-            if pd.notna(r.get('true_total_messages')) and str(r['true_total_messages']).strip() != '':
-                val = str(r['true_total_messages']).replace(',', '')
-                corrections_map_msgs[r['week_start']] = int(val)
-
+    # corrections_map_users / corrections_map_msgs already loaded earlier (used for `overall` too)
     data_loss_dates = set(pd.to_datetime(DATA_LOSS_WEEKS))
     weeks_set_full = set(weekly_base['Week Start'])
 
@@ -399,7 +420,8 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
             "weeks": [w.strftime('%Y-%m-%d') for w in weeks],
             "week_labels": week_labels,
             "date_range": [weeks[0].strftime('%Y-%m-%d'), weeks[-1].strftime('%Y-%m-%d')],
-            "quarter_boundary_week": "2026-03-30"
+            "quarter_boundary_week": "2026-03-30",
+            "narrative_cutoff": NARRATIVE_CUTOFF
         },
         "overall": overall,
         "cohorts": cohort_weekly,
