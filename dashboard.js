@@ -74,6 +74,217 @@ document.getElementById('stat-strip').innerHTML = statStripHtml;
 document.getElementById('foot-rows').textContent = fmt(DATA.meta.total_rows);
 document.getElementById('foot-users').textContent = fmt(DATA.meta.unique_users);
 
+// ---------- YoY hero section ----------
+const yoyData = DATA.yoy;
+const ns = yoyData.narrative_stats;
+
+document.getElementById('yoy-narrative-callouts').innerHTML = `
+  <div class="note-card">
+    <span class="note-tag risk">${ns.pre.label}</span>
+    <div class="note-body">Averaged <b>${fmt(ns.pre.mean_active)}</b> active members/week, but swung wildly — from a peak of <b>${fmt(ns.pre.peak)}</b> down to just <b>${fmt(ns.pre.trough)}</b> (a ${ns.pre.peak_to_trough_pct}% peak-to-trough collapse). Overall trend across the period: <b style="color:var(--rust)">declining</b> (${ns.pre.net_change_pct}% net change, start to end). Classic viral-burst-then-bleed-out pattern.</div>
+  </div>
+  <div class="note-card">
+    <span class="note-tag opp">${ns.post.label}</span>
+    <div class="note-body">Averaged <b>${fmt(ns.post.mean_active)}</b> active members/week, with volatility roughly <b>half</b> the prior period (${ns.post.cv_pct}% vs ${ns.pre.cv_pct}% coefficient of variation). Overall trend: <b style="color:var(--moss)">growing</b> at about ${ns.post.trend_per_week.toFixed(0)} members/week on average — a net <b>+${ns.post.net_change_pct}%</b> from the start of this period to now. Steadier and climbing, instead of spiking and crashing.</div>
+  </div>
+`;
+
+const boundaryDate = ns.cutoff_date;
+const fh = yoyData.full_history;
+const boundaryFhIdx = fh.findIndex(w => w.week === boundaryDate);
+
+const yoyBoundaryPlugin = {
+  id: 'yoyBoundary',
+  afterDraw(chart){
+    if (boundaryFhIdx < 0) return;
+    const xScale = chart.scales.x;
+    const x = xScale.getPixelForValue(boundaryFhIdx);
+    const {top, bottom} = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = COLORS.moss;
+    ctx.setLineDash([5,4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = COLORS.moss;
+    ctx.font = "10px 'JetBrains Mono'";
+    ctx.fillText('New community management begins', x+5, top+11);
+    ctx.restore();
+  }
+};
+
+new Chart(document.getElementById('yoyFullHistoryChart'), {
+  type:'line',
+  plugins: [yoyBoundaryPlugin],
+  data:{
+    labels: fh.map(w=>w.week_label),
+    datasets:[{
+      label:'Active members/week',
+      data: fh.map(w=>w.active_users),
+      borderColor: COLORS.amber,
+      backgroundColor: 'rgba(232,162,76,0.06)',
+      fill: true, tension:0.25, borderWidth:2,
+      pointRadius: fh.map(w => (w.is_corrected || w.is_data_loss) ? 3 : 0),
+      pointBackgroundColor: fh.map(w => w.is_data_loss ? COLORS.inkFaint : (w.is_corrected ? COLORS.violet : COLORS.amber)),
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{display:false},
+      tooltip:{ callbacks:{ afterLabel: (ctx)=>{
+        const w = fh[ctx.dataIndex];
+        if (w.is_data_loss) return '† Statbot outage — real number was higher';
+        if (w.is_corrected) return '* Export cap corrected to true value';
+        return '';
+      }}}
+    },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxTicksLimit:12} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'active members'} }
+    }
+  }
+});
+
+// YoY comparison table -- most recent 10 matched weeks, to keep it readable
+const recentPairs = yoyData.yoy_pairs.slice(-10);
+const yoyTable = document.getElementById('yoy-comparison-table');
+yoyTable.innerHTML = `
+  <tr>
+    <th class="row-head" style="text-align:left;">Week</th>
+    <th>This year</th>
+    <th>Same week, last year</th>
+    <th>Change</th>
+  </tr>
+  ${recentPairs.map(p => `
+    <tr>
+      <td style="text-align:left;color:var(--ink);">${p.current_week_label}${p.current_is_data_loss?' †':''}</td>
+      <td>${fmt(p.current_active)}</td>
+      <td>${fmt(p.prior_active)}${p.prior_is_corrected?' *':''}</td>
+      <td style="color:${p.pct_change_active>=0?'var(--moss)':'var(--rust)'};font-weight:600;">${p.pct_change_active>=0?'+':''}${p.pct_change_active}%</td>
+    </tr>
+  `).join('')}
+`;
+
+// Ladder YoY -- total population across all tiers, full history
+const ladderCols = yoyData.ladder_cols;
+const ladderHist = yoyData.ladder_history;
+new Chart(document.getElementById('yoyLadderChart'), {
+  type:'line',
+  data:{
+    labels: fh.map(w=>w.week_label),
+    datasets:[{
+      label:'Total members across all ladder tiers',
+      data: ladderHist.map(w => ladderCols.reduce((sum,c)=>sum+w[c],0)),
+      borderColor: COLORS.violet, backgroundColor:'rgba(160,145,217,0.08)',
+      fill:true, tension:0.25, borderWidth:2, pointRadius:0
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxTicksLimit:12} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'members holding a ladder tier'} }
+    }
+  }
+});
+
+// ---------- Membership churn (Discord's own join/leave ledger) ----------
+const churn = DATA.membership_churn;
+if (!churn) {
+  const churnSection = document.getElementById('churn-section');
+  if (churnSection) churnSection.style.display = 'none';
+} else {
+const churnWeekly = churn.weekly;
+const churnPre = churn.pre, churnPost = churn.post;
+
+document.getElementById('churn-callouts').innerHTML = `
+  <div class="note-card">
+    <span class="note-tag risk">Joins collapsed — this part is real</span>
+    <div class="note-body">Average weekly joins fell from <b>${fmt(churnPre.avg_joins)}</b> pre-November to <b>${fmt(churnPost.avg_joins)}</b> after &mdash; less than half. Whatever drove the original viral wave hasn't come back. This is a genuine, separate problem from retention, not something this section explains away.</div>
+  </div>
+  <div class="note-card">
+    <span class="note-tag opp">Churn rate nearly halved</span>
+    <div class="note-body">Leaves as a share of the whole standing membership dropped from <b>${churnPre.avg_churn_rate_pct}%</b>/week pre-November to <b>${churnPost.avg_churn_rate_pct}%</b>/week after &mdash; independent confirmation, from Discord's own membership data, that people who are here now are leaving at a meaningfully lower rate.</div>
+  </div>
+  <div class="note-card">
+    <span class="note-tag watch">One honest caveat</span>
+    <div class="note-body">Some of the pre-November churn was likely always going to happen &mdash; a chunk of those joiners arrived during the viral spike and were low-intent, drive-by joins that tend to leave quickly regardless of community management. The improvement is real, but "better community management" and "the joiner mix naturally shifted" are both plausible contributors.</div>
+  </div>
+`;
+
+new Chart(document.getElementById('churnJoinsLeavesChart'), {
+  type:'bar',
+  data:{
+    labels: churnWeekly.map(w=>w.week_label),
+    datasets:[
+      { label:'Joins', data: churnWeekly.map(w=>w.joins), backgroundColor: COLORS.moss },
+      { label:'Leaves', data: churnWeekly.map(w=>-w.leaves), backgroundColor: COLORS.rust }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
+      tooltip:{ callbacks:{ label:(ctx)=> `${ctx.dataset.label}: ${fmt(Math.abs(ctx.parsed.y))}` } }
+    },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxTicksLimit:14} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'members/week'} }
+    }
+  }
+});
+
+const churnBoundaryIdx = churnWeekly.findIndex(w => w.week === churn.cutoff_date);
+const churnBoundaryPlugin = {
+  id: 'churnBoundary',
+  afterDraw(chart){
+    if (churnBoundaryIdx < 0) return;
+    const x = chart.scales.x.getPixelForValue(churnBoundaryIdx);
+    const {top, bottom} = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = COLORS.moss;
+    ctx.setLineDash([5,4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = COLORS.moss;
+    ctx.font = "10px 'JetBrains Mono'";
+    ctx.fillText('New community management begins', x+5, top+11);
+    ctx.restore();
+  }
+};
+
+new Chart(document.getElementById('churnRateChart'), {
+  type:'line',
+  plugins: [churnBoundaryPlugin],
+  data:{
+    labels: churnWeekly.map(w=>w.week_label),
+    datasets:[{
+      label:'Weekly churn rate (leaves / standing members)',
+      data: churnWeekly.map(w=>w.churn_rate_pct),
+      borderColor: COLORS.rust, backgroundColor:'rgba(217,112,92,0.08)',
+      fill:true, tension:0.3, pointRadius:0, borderWidth:2
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{display:false}, ticks:{maxTicksLimit:14} },
+      y:{ grid:{color:COLORS.line}, title:{display:true,text:'% of standing members leaving/week'} }
+    }
+  }
+});
+}
+
 // ---------- 01 Census chart ----------
 const boundaryIdx = weeks.indexOf(DATA.meta.quarter_boundary_week);
 const quarterMarkerPlugin = {
@@ -330,7 +541,7 @@ new Chart(document.getElementById('activationChart'), {
 // ---------- 07 Tier contribution ----------
 const tc = DATA.tier_contribution;
 const tierLabels = tc.tier_bucket_labels;
-const tierPalette = ['#5C6B66', ...ANIMAL_COLS.map((_,i)=> `hsl(${30 + i*14}, 55%, ${58 - i*1.5}%)`)];
+const tierPalette = ['#3A4248', '#5C6B66', ...ANIMAL_COLS.map((_,i)=> `hsl(${30 + i*14}, 55%, ${58 - i*1.5}%)`)];
 
 new Chart(document.getElementById('tierVolumeChart'), {
   type:'bar',
@@ -379,23 +590,56 @@ new Chart(document.getElementById('tierPerCapitaChart'), {
   }
 });
 
-// ---------- 08 Presence: retention & stickiness ----------
-const retentionCurve = DATA.retention_curve;
-new Chart(document.getElementById('retentionChart'), {
+// ---------- 08 Presence: pre/post-Nov retention & stickiness ----------
+const prepostRet = DATA.prepost_retention;
+const preCurve = prepostRet.pre_curve, postCurve = prepostRet.post_curve;
+
+// summary stat for the callout: avg retention across offsets 1-12 (solid sample size on both sides)
+const avgRange = [1,12];
+function avgPct(curve){
+  const inRange = curve.filter(r=>r.offset>=avgRange[0] && r.offset<=avgRange[1]);
+  return inRange.reduce((a,r)=>a+r.pct,0)/inRange.length;
+}
+const preAvg = avgPct(preCurve), postAvg = avgPct(postCurve);
+const retDiff = postAvg - preAvg;
+
+document.getElementById('prepost-retention-callout').innerHTML = `
+  <div class="note-card">
+    <span class="note-tag watch">Individual retention, weeks 1-12 average</span>
+    <div class="note-body">Members who joined <b>before</b> Nov 3, 2025: <b>${preAvg.toFixed(1)}%</b> average retention.
+    Members who joined <b>on/after</b> Nov 3, 2025: <b>${postAvg.toFixed(1)}%</b> average retention.
+    A real but modest improvement (${retDiff>=0?'+':''}${retDiff.toFixed(1)}pt, ${(100*retDiff/preAvg).toFixed(1)}% relative) &mdash;
+    much smaller than the swing in aggregate weekly headcount stability shown above. That suggests the community-level
+    steadiness is more about a more consistent flow of new members each week than dramatically stickier individual behavior.</div>
+  </div>
+`;
+
+// build a shared label set out to the longer of the two curves
+const maxOffset = Math.max(preCurve.length, postCurve.length) - 1;
+const offsetLabels = Array.from({length: maxOffset+1}, (_,i)=>`+${i}wk`);
+const preByOffset = Object.fromEntries(preCurve.map(r=>[r.offset, r.pct]));
+const postByOffset = Object.fromEntries(postCurve.map(r=>[r.offset, r.pct]));
+
+new Chart(document.getElementById('prepostRetentionChart'), {
   type:'line',
   data:{
-    labels: retentionCurve.map(r=>`+${r.offset}wk`),
-    datasets:[{
-      label:'% of first-week cohort still active',
-      data: retentionCurve.map(r=>r.pct),
-      borderColor: COLORS.amber, backgroundColor:'rgba(232,162,76,0.08)',
-      fill:true, tension:0.25, pointRadius:2, borderWidth:2
-    }]
+    labels: offsetLabels,
+    datasets:[
+      { label:'Joined before Nov 3, 2025', data: offsetLabels.map((_,i)=>preByOffset[i] ?? null),
+        borderColor: COLORS.inkFaint, backgroundColor:'transparent', tension:0.25, pointRadius:2, borderWidth:2, borderDash:[4,3] },
+      { label:'Joined on/after Nov 3, 2025', data: offsetLabels.map((_,i)=>postByOffset[i] ?? null),
+        borderColor: COLORS.moss, backgroundColor:'rgba(127,191,143,0.08)', fill:true, tension:0.25, pointRadius:2, borderWidth:2 }
+    ]
   },
   options:{
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:false},
-      tooltip:{ callbacks:{ afterLabel:(ctx)=>`n=${fmt(retentionCurve[ctx.dataIndex].n)} in this cohort` } }
+    interaction:{mode:'index', intersect:false},
+    plugins:{ legend:{position:'top', align:'end', labels:{boxWidth:10, usePointStyle:true}},
+      tooltip:{ callbacks:{ afterBody:(items)=>{
+        const idx = items[0].dataIndex;
+        const preN = preCurve[idx]?.n, postN = postCurve[idx]?.n;
+        return [`n=${preN?fmt(preN):'—'} (pre) / ${postN?fmt(postN):'—'} (post)`];
+      }}}
     },
     scales:{
       x:{ grid:{display:false}, title:{display:true,text:'weeks since first appearance'} },
@@ -496,8 +740,9 @@ const ladderMomentum = ANIMAL_COLS.map(name=>{
 
 const notes = [];
 
-// Top volume-driving tier, latest week (excluding tiny-N tiers)
+// Top volume-driving tier, latest week (actual ladder rungs only — excluding the two non-tier buckets, and tiny-N tiers)
 const latestTierEntries = tierLabels
+  .filter(label => label !== 'No role at all' && label !== 'Animals only (no tier)')
   .map(label => ({ label, vol: latestVol[label], mem: latestMem[label] }))
   .filter(t => t.mem >= 10);
 const topVolumeTier = [...latestTierEntries].sort((a,b)=>b.vol-a.vol)[0];
@@ -517,12 +762,12 @@ notes.push({
   body:`<b>${activation.overall_rate}%</b> of message-senders hit 3+ messages in their first week &mdash; well above Discord's ${DISCORD_BENCHMARK}% first-day benchmark, though this is measured against people who message at all, not your full member base. Worth checking whether that gap is real strength in onboarding or just a measurement difference (weekly window vs. their daily one).`
 });
 
-const week1Ret = retentionCurve.find(r=>r.offset===1);
-const week8Ret = retentionCurve.find(r=>r.offset===8);
+const week1Ret = postCurve.find(r=>r.offset===1);
+const week8Ret = postCurve.find(r=>r.offset===8);
 if (week1Ret && week8Ret) {
   notes.push({
     tag:'risk', label:'Early drop-off',
-    body:`Of members active in their first week, only <b>${week1Ret.pct}%</b> are still active the following week, falling to <b>${week8Ret.pct}%</b> by 8 weeks out. Most of the drop happens immediately &mdash; if there's a lever for retention, it's likely in week one, not week eight.`
+    body:`Even in the post-November cohort, only <b>${week1Ret.pct}%</b> of members active in their first week are still active the following week, falling to <b>${week8Ret.pct}%</b> by 8 weeks out. Most of the drop happens immediately &mdash; if there's a lever for retention, it's likely in week one, not week eight. The community-management shift improved this only modestly (see Member Presence above) &mdash; early drop-off is still the biggest single pattern in the data.`
   });
 }
 

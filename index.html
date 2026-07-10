@@ -394,6 +394,28 @@
 
   <div class="stat-strip" id="stat-strip"></div>
 
+  <!-- YoY hero section -->
+  <div class="section" id="yoy-section">
+    <div class="section-head"><span class="section-num">★</span><h2>One Year in Review — The Turnaround</h2></div>
+    <div class="section-desc">Full history back to January 2025, corrected for a Statbot export cap that undercounted 26 weeks (marked with *), and flagged for one week of confirmed data loss (marked with †). See the note below the chart for details on both.</div>
+    <div class="notes-grid" id="yoy-narrative-callouts" style="margin-bottom:20px;"></div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:320px;"><canvas id="yoyFullHistoryChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:8px;">Same calendar week, one year apart. Because early-to-mid 2025 was an inflated, viral-driven peak that later collapsed, comparing against it will mostly show a decline — that's the artificial 2025 baseline, not a problem with current performance. The "growth since the trough" numbers above are the fairer read.</div>
+    <div class="panel" style="overflow-x:auto;"><table class="overlap-table" id="yoy-comparison-table" style="min-width:0;"></table></div>
+    <div class="section-desc" style="margin-top:24px;">The leveling ladder existed the whole time, so its growth is a clean one-year comparison with no caveats needed:</div>
+    <div class="panel"><div class="chart-box short"><canvas id="yoyLadderChart"></canvas></div></div>
+  </div>
+
+  <!-- Membership churn -->
+  <div class="section" id="churn-section">
+    <div class="section-head"><span class="section-num">★</span><h2>Membership Churn — Are We Actually Keeping People?</h2></div>
+    <div class="section-desc">This section uses Discord's own official membership ledger (joins/leaves), not the Statbot messaging export — an independent check on everything above. Standing membership is estimated by cumulative net change, anchored to the current known total of 442,034.</div>
+    <div class="notes-grid" id="churn-callouts" style="margin-bottom:20px;"></div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box" style="height:280px;"><canvas id="churnJoinsLeavesChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:8px;">The naive "leaves as a % of that week's joins" ratio is misleading here — when joins collapse, that ratio rises even if nobody's actually leaving more. The fairer number is leaves as a % of the whole standing membership:</div>
+    <div class="panel"><div class="chart-box short"><canvas id="churnRateChart"></canvas></div></div>
+  </div>
+
   <!-- 01 Census -->
   <div class="section">
     <div class="section-head"><span class="section-num">01</span><h2>The Weekly Census</h2></div>
@@ -443,7 +465,7 @@
   <!-- 06 Tier Contribution -->
   <div class="section">
     <div class="section-head"><span class="section-num">07</span><h2>Where the Messages Come From</h2></div>
-    <div class="section-desc">Every member's message volume that week, bucketed by the tier they held <b>that week</b> (not cumulative — a Tiger LVL 30 member counts only in Tiger, not in every tier below it). This is the volume-driver view: which rungs are actually carrying the conversation.</div>
+    <div class="section-desc">Every member's message volume that week, bucketed by the tier they held <b>that week</b> (not cumulative — a Tiger LVL 30 member counts only in Tiger, not in every tier below it). "Animals only (no tier)" means they have the entry role but haven't reached Gorilla LVL 1 yet; "No role at all" means they don't even have Animals. This is the volume-driver view: which rungs are actually carrying the conversation.</div>
     <div class="panel"><div class="chart-box" style="height:340px;"><canvas id="tierVolumeChart"></canvas></div></div>
     <div class="section-desc" style="margin-top:24px;">Same weeks, but messages per member in each bucket — which tier is most productive per person, not just in aggregate:</div>
     <div class="panel"><div class="chart-box" style="height:300px;"><canvas id="tierPerCapitaChart"></canvas></div></div>
@@ -452,8 +474,10 @@
   <!-- 07 Presence -->
   <div class="section">
     <div class="section-head"><span class="section-num">08</span><h2>Member Presence — Retention &amp; Stickiness</h2></div>
-    <div class="section-desc">Of everyone who first showed up in a given week, what share are still showing up N weeks later — averaged across every cohort's start week. And separately: across the full 27 weeks, how many distinct weeks did each member show up at all.</div>
-    <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="retentionChart"></canvas></div></div>
+    <div class="section-desc">Does retention actually differ for members who joined before vs. after the November 2025 shift in community management? Each line follows its own cohort from their first appearance forward — not a snapshot, an actual trajectory.</div>
+    <div class="notes-grid" id="prepost-retention-callout" style="margin-bottom:16px;"></div>
+    <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="prepostRetentionChart"></canvas></div></div>
+    <div class="section-desc" style="margin-top:24px;">And separately: across the full history, how many distinct weeks did each member show up at all — regardless of when they joined.</div>
     <div class="panel"><div class="chart-box short"><canvas id="stickinessChart"></canvas></div></div>
   </div>
 
