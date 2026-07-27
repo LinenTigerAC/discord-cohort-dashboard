@@ -77,16 +77,40 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         print(f"Dropped {before - len(df)} exact-duplicate rows (identical across every column -- "
               f"a known export artifact, safe to remove).")
 
-    # Step 2: check for remaining same-user-same-week rows that DON'T match exactly --
-    # this is a more serious signal (conflicting data for the same person/week) and
-    # gets a loud warning rather than a silent drop.
+    # Step 2: check for remaining same-user-same-week rows that DON'T match exactly.
+    # Known pattern (seen recurring in the weekly exports): the same person/week gets
+    # captured twice, and a role/level flag flips from False to True in between the two
+    # captures (e.g. they cross a streak or level threshold mid-export). Weekly Messages
+    # never differs in these cases -- only the boolean cohort columns do. Since roles are
+    # only ever gained, never lost, the safe fix is to merge via logical OR (True wins)
+    # rather than arbitrarily keeping one row and silently dropping real role data.
     conflict_mask = df.duplicated(subset=['Discord ID', 'Week Start'], keep=False)
     if conflict_mask.any():
-        n_conflicts = df[conflict_mask].groupby(['Discord ID','Week Start']).ngroups
-        print(f"WARNING: {n_conflicts} user-weeks have CONFLICTING duplicate rows (same person, same week, "
-              f"different values). Keeping the first occurrence for each, but this should be investigated -- "
-              f"it means two different message counts exist for the same person/week.")
-        df = df.drop_duplicates(subset=['Discord ID', 'Week Start'], keep='first')
+        conflict_groups = df[conflict_mask].groupby(['Discord ID', 'Week Start'])
+        n_conflicts = conflict_groups.ngroups
+        msg_conflicts = sum(1 for _, g in conflict_groups if g['Weekly Messages'].nunique() > 1)
+        print(f"Found {n_conflicts} user-weeks with conflicting duplicate rows (same person, same week, "
+              f"different values). Merging cohort/level flags via logical OR (roles are only ever gained, "
+              f"never lost, so this is safe).")
+        if msg_conflicts:
+            print(f"WARNING: {msg_conflicts} of those also have DIFFERING message counts, not just cohort "
+                  f"flags -- this is a different, more serious issue and was NOT auto-resolved the same way. "
+                  f"Investigate these specifically; the merge below just takes the max message count for them.")
+
+        def merge_group(g):
+            if len(g) == 1:
+                return g.iloc[0]
+            merged = g.iloc[0].copy()
+            for c in COHORT_COLS:
+                merged[c] = bool(g[c].any())
+            merged['Weekly Messages'] = g['Weekly Messages'].max()
+            return merged
+
+        conflict_keys = set(df[conflict_mask].set_index(['Discord ID','Week Start']).index)
+        conflict_rows = df[df.set_index(['Discord ID','Week Start']).index.isin(conflict_keys)]
+        clean_rows = df[~df.set_index(['Discord ID','Week Start']).index.isin(conflict_keys)]
+        merged_rows = conflict_rows.groupby(['Discord ID','Week Start'], as_index=False, group_keys=False).apply(merge_group)
+        df = pd.concat([clean_rows, merged_rows], ignore_index=True).sort_values('Week Start')
 
     weeks = sorted(df['Week Start'].unique())
     week_labels = [w.strftime('%b %-d') for w in weeks]
