@@ -929,13 +929,14 @@ document.getElementById('notes-grid').innerHTML = notes.map(n=>`
 `).join('');
 
 // ---------- 09 Level Hoodie Launch tracking ----------
-function levelLaunchMarkerPlugin(label){
+function levelLaunchMarkerPlugin(label, idxOverride){
   return {
     id: 'levelLaunchMarker',
     afterDraw(chart){
       const xScale = chart.scales.x;
       const {top, bottom, right} = chart.chartArea;
-      const idx = levelLaunch.weekly.length; // launch falls just after the last available week
+      // launch falls just after the last available week on whichever series is charted
+      const idx = (idxOverride !== undefined) ? idxOverride : levelLaunch.weekly.length;
       let x = xScale.getPixelForValue(idx);
       if (!isFinite(x) || x > right) x = right;
       const ctx = chart.ctx;
@@ -983,6 +984,7 @@ function renderLevelLaunchCharts(){
       },
       options:{
         responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
         plugins:{ legend:{display:false}, tooltip:{callbacks:{title:(items)=>items[0].label}} },
         scales:{
           x:{ grid:{display:false}, ticks:{maxTicksLimit:6} },
@@ -993,6 +995,126 @@ function renderLevelLaunchCharts(){
   });
 }
 renderLevelLaunchCharts();
+
+// ---------- 09b Level Hoodie Launch — success metrics (collapsible) ----------
+function renderLaunchSuccessMetrics(){
+  const ls = DATA.level_launch_success;
+  if (!ls) return;
+
+  // --- Gorilla leak rate: % of each week's new Animals-holders who never reach Gorilla LVL1 ---
+  const gl = ls.gorilla_leak_rate;
+  const glEl = document.getElementById('gorillaLeakChart');
+  if (glEl && gl && gl.cohorts.length){
+    new Chart(glEl, {
+      type:'line',
+      data:{
+        labels: gl.cohorts.map(c=>c.week_label),
+        datasets:[{
+          label:'% of Animals-holders who never reach Gorilla LVL 1',
+          data: gl.cohorts.map(c=>c.pct_never_gorilla),
+          borderColor: COLORS.amber, backgroundColor: COLORS.amber+'14',
+          fill:true, tension:0.3, pointRadius:0, borderWidth:2
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{
+            title:(items)=>items[0].label,
+            label:(item)=>{
+              const c = gl.cohorts[item.dataIndex];
+              return [`${fmt1(c.pct_never_gorilla)}% never reached Gorilla`, `cohort size: ${fmt(c.cohort_size)}`];
+            }
+          }}
+        },
+        scales:{
+          x:{ grid:{display:false}, ticks:{maxTicksLimit:6} },
+          y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% never reach Gorilla'} }
+        }
+      }
+    });
+  }
+
+  // --- Frog -> Turkey conversion ---
+  const ft = ls.frog_turkey_conversion;
+  const ftEl = document.getElementById('frogTurkeyConversionChart');
+  if (ftEl && ft && ft.cohorts.length){
+    new Chart(ftEl, {
+      type:'line',
+      data:{
+        labels: ft.cohorts.map(c=>c.week_label),
+        datasets:[{
+          label:'% of Frog achievers who ever reach Turkey',
+          data: ft.cohorts.map(c=>c.pct_reached_turkey),
+          borderColor: COLORS.moss, backgroundColor: COLORS.moss+'14',
+          fill:true, tension:0.3, pointRadius:0, borderWidth:2
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{
+            title:(items)=>items[0].label,
+            label:(item)=>{
+              const c = ft.cohorts[item.dataIndex];
+              return [`${fmt1(c.pct_reached_turkey)}% reached Turkey`, `Frog cohort size: ${fmt(c.cohort_size)}`];
+            }
+          }}
+        },
+        scales:{
+          x:{ grid:{display:false}, ticks:{maxTicksLimit:6} },
+          y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% Frog → Turkey'} }
+        }
+      }
+    });
+  }
+
+  // --- Streak conversion (Frog/Turkey -> 7-Day Streak), snapshot stats not a weekly line ---
+  const sc = ls.streak_conversion;
+  const scEl = document.getElementById('streak-conversion-stats');
+  if (scEl && sc){
+    const row = (emoji, name, s) => `
+      <div class="stat">
+        <div class="label">${emoji} ${name} → 7-Day Streak</div>
+        <div class="value">${fmt1(s.pct_ever)}%</div>
+        <div class="sub">ever · ${fmt1(s.pct_strictly_after)}% strictly after · n=${fmt(s.eligible_n)} eligible</div>
+      </div>`;
+    scEl.innerHTML = row('🐸','Frog', sc.frog) + row('🦃','Turkey', sc.turkey);
+  }
+
+  // --- Weekly retention guardrail, current era onward, with the Oct 1 launch marker ---
+  const rw = (ls.retention_weekly || []).filter(w => w.week >= narrativeCutoff);
+  const rwEl = document.getElementById('retentionWeeklyChart');
+  if (rwEl && rw.length){
+    new Chart(rwEl, {
+      type:'line',
+      plugins: [levelLaunchMarkerPlugin('Hoodie launch', rw.length)],
+      data:{
+        labels: rw.map(w=>w.week_label),
+        datasets:[{
+          label:'Week-over-week retention',
+          data: rw.map(w=>w.pct),
+          borderColor: COLORS.ink, backgroundColor: COLORS.ink+'10',
+          fill:true, tension:0.3, pointRadius:0, borderWidth:2
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{ legend:{display:false}, tooltip:{callbacks:{title:(items)=>items[0].label}} },
+        scales:{
+          x:{ grid:{display:false}, ticks:{maxTicksLimit:6} },
+          y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% retained next week'} }
+        }
+      }
+    });
+  }
+}
+renderLaunchSuccessMetrics();
 
 // ---------- Detail view ----------
 let detailChartInstance = null;

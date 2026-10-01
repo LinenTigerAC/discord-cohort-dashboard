@@ -299,6 +299,14 @@
     color:var(--ink-dim);
     margin:0 0 10px;
   }
+  .launch-sub-head{
+    font-family:var(--serif);
+    font-size:16px;
+    font-weight:600;
+    color:var(--ink);
+    margin:28px 0 6px;
+  }
+  .launch-sub-head:first-of-type{ margin-top:4px; }
   .note-card{
     background:var(--bg-card);
     border:1px solid var(--line);
@@ -499,6 +507,7 @@
     <span class="section-nav-divider"></span>
     <a href="#yoy-section">Year in Review</a>
     <a href="#churn-section">Churn</a>
+    <a href="#launch-success-section">Launch Metrics</a>
     <a href="#eventlog-section">Event Log</a>
   </nav>
 
@@ -625,6 +634,33 @@
       <div class="panel" style="margin-bottom:16px;"><div class="chart-box short"><canvas id="churnRateChart"></canvas></div></div>
       <div class="section-desc" style="margin-top:24px;">A different cut on the same question: across the full history, how many distinct weeks did each member show up at all, regardless of when they joined. This is where a member landing as a one-and-done vs. a regular shows up.</div>
       <div class="panel"><div class="chart-box short"><canvas id="stickinessChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- Level Hoodie Launch success metrics (collapsed by default -- cohort-based, slower-moving than the weekly sections above) -->
+  <div class="section" id="launch-success-section">
+    <div class="section-head collapsible-head" onclick="toggleSection('launch-success-body', this)">
+      <span class="section-num">★</span><h2>Level Hoodie Launch — Success Metrics</h2>
+      <span class="collapse-icon">▸ expand</span>
+    </div>
+    <div class="collapsible-body" id="launch-success-body">
+      <div class="section-desc">Four checks on whether the hoodie rewards are changing behavior, not just correlating with it. Each is cohort-based — what happened to the people who reached a milestone, tracked <i>after</i> that milestone — so the most recent weeks are deliberately left off each chart until there's been enough time to see the real outcome rather than a too-early guess.</div>
+
+      <h3 class="launch-sub-head">🦍 Gorilla LVL 1 — are fewer new members stalling at zero?</h3>
+      <div class="section-desc">Of each week's new Animals-role holders, the % who <b>never</b> go on to reach Gorilla LVL 1 at all — measured against Animals-holders specifically, not every visitor, since plenty of one-off visitors never get even the entry badge and this program can't influence that group. A falling line is the win. Cut off 8 weeks before the most recent data — a cohort needs that long to prove it's really stuck rather than just not-there-yet.</div>
+      <div class="panel"><div class="chart-box short"><canvas id="gorillaLeakChart"></canvas></div></div>
+
+      <h3 class="launch-sub-head">🐸 Frog LVL 6 → 🦃 Turkey LVL 10 — is the gathering point turning into forward motion?</h3>
+      <div class="section-desc">Of each week's new Frog achievers, the % who go on to ever reach Turkey. Historically only about a third of Frog achievers ever advance further — but when they do, it's fast: most conversions land within 13 weeks, which is the maturation cutoff used here. A rising line is the win.</div>
+      <div class="panel"><div class="chart-box short"><canvas id="frogTurkeyConversionChart"></canvas></div></div>
+
+      <h3 class="launch-sub-head">🐸 🦃 → 7-Day Streak — slow-moving, check quarterly not weekly</h3>
+      <div class="section-desc">The % of Frog/Turkey achievers (restricted to those who reached it 26+ weeks ago) who went on to earn a 7-Day Streak. Reported as a current snapshot rather than a weekly line, since the real tail on this one runs 6+ months — a week-by-week chart would mostly be unmatured blank space. <b>Ever</b> is the upper bound; <b>strictly after</b> excludes cases where Streak lands the <i>same week</i> as the level — more likely a simultaneous activity burst than one causing the other, the same pattern flagged earlier for the original Turkey→Streak claim. The gap between the two is a rough read on how much of the lift is genuinely sequential.</div>
+      <div class="stat-strip" id="streak-conversion-stats" style="margin-bottom:24px;"></div>
+
+      <h3 class="launch-sub-head">Guardrail — is overall retention holding steady?</h3>
+      <div class="section-desc">Plain week-to-week retention, computed fresh from this data (not a lifetime curve): of this week's active members, what % show up again the following week. If the push toward streak-chasing starts costing more than it earns, this is where it would show up first.</div>
+      <div class="panel"><div class="chart-box short"><canvas id="retentionWeeklyChart"></canvas></div></div>
     </div>
   </div>
 

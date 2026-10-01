@@ -415,6 +415,111 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         "weekly": level_launch_weekly
     }
 
+    # ---------- Level Hoodie Rewards: success metrics ----------
+    # Four measures, each checking a different part of the theory of change
+    # behind the three hoodie tiers. All are cohort-based (did people who hit
+    # milestone X at a given time go on to do Y), which means recent cohorts
+    # haven't had enough time to show their true rate yet -- each one is cut
+    # off at a maturation window before "now" so immature cohorts don't read
+    # as false negatives. Windows were set from the actual historical lag
+    # distribution, not guessed: Frog->Turkey resolves fast when it happens
+    # (95th percentile 13 weeks), Frog/Turkey->Streak has a much longer tail
+    # (80th percentile ~25 weeks for Frog->Streak), so these move on very
+    # different timescales. Only Gorilla's leak rate and Frog->Turkey are
+    # built as cohort trend lines (fast-moving enough to be worth a weekly
+    # look); the Streak conversions are reported as a single current-state
+    # stat, since a weekly trend line would be mostly unmatured blank space.
+    GORILLA_MATURATION_WEEKS = 8
+    FROG_TURKEY_MATURATION_WEEKS = 13
+    STREAK_MATURATION_WEEKS = 26
+    success_era_cutoff = pd.Timestamp(NARRATIVE_CUTOFF)  # same "current era" start used elsewhere (e.g. Activation)
+
+    fw_msg_all = df.groupby('Discord ID')['Week Start'].min()
+    fw_by_level = {lvl: first_week_by_level[lvl] for lvl in LEVEL_LAUNCH_LEVELS}
+    fw_animals = df[df['Animals'] == True].groupby('Discord ID')['Week Start'].min()
+    fw_streak = df[df['7-Day Streak'] == True].groupby('Discord ID')['Week Start'].min()
+
+    # 1) Gorilla leak rate: of each week's new Animals-holders, % who NEVER
+    # reach Gorilla LVL 1 (measured against Animals-holders specifically, not
+    # every visitor, since plenty of one-off visitors never even get the
+    # entry badge and aren't part of what this program can influence).
+    gorilla_cohort_df = pd.DataFrame({'first_msg': fw_msg_all})
+    gorilla_cohort_df['has_animals'] = gorilla_cohort_df.index.isin(fw_animals.index)
+    gorilla_cohort_df['has_gorilla'] = gorilla_cohort_df.index.isin(fw_by_level['Gorilla LVL 1'].index)
+    animals_cohorts = gorilla_cohort_df[gorilla_cohort_df['has_animals']]
+    g_grp = animals_cohorts.groupby('first_msg').agg(n=('has_gorilla', 'size'), reached=('has_gorilla', 'sum'))
+    g_cutoff = max(weeks) - pd.Timedelta(weeks=GORILLA_MATURATION_WEEKS)
+    g_grp = g_grp[(g_grp.index >= success_era_cutoff) & (g_grp.index <= g_cutoff)]
+    gorilla_leak_cohorts = [
+        {"week": w.strftime('%Y-%m-%d'), "week_label": w.strftime('%b %-d, %Y'),
+         "cohort_size": int(r['n']), "pct_never_gorilla": round(100 * (1 - r['reached'] / r['n']), 1)}
+        for w, r in g_grp.iterrows()
+    ]
+
+    # 2) Frog -> Turkey: of each week's new Frog achievers, % who go on to
+    # ever reach Turkey (no fixed follow-on window beyond the maturation cut
+    # below, since by definition Turkey can only be reached at or after Frog).
+    ft_cohort_df = pd.DataFrame({'first_frog': fw_by_level['Frog LVL 6']})
+    ft_cohort_df['has_turkey'] = ft_cohort_df.index.isin(fw_by_level['Turkey LVL 10'].index)
+    ft_grp = ft_cohort_df.groupby('first_frog').agg(n=('has_turkey', 'size'), reached=('has_turkey', 'sum'))
+    ft_cutoff = max(weeks) - pd.Timedelta(weeks=FROG_TURKEY_MATURATION_WEEKS)
+    ft_grp = ft_grp[(ft_grp.index >= success_era_cutoff) & (ft_grp.index <= ft_cutoff)]
+    frog_turkey_cohorts = [
+        {"week": w.strftime('%Y-%m-%d'), "week_label": w.strftime('%b %-d, %Y'),
+         "cohort_size": int(r['n']), "pct_reached_turkey": round(100 * r['reached'] / r['n'], 1)}
+        for w, r in ft_grp.iterrows()
+    ]
+
+    # 3) Frog/Turkey -> 7-Day Streak: current-state snapshot, not a weekly
+    # trend (the long tail means most recent months haven't matured yet, so a
+    # weekly line would mostly show blank/unmatured space). Reported as of
+    # the latest week, split into "ever converts" (upper bound) and "streak
+    # strictly after reaching the level" (the causally cleaner cut -- streak
+    # and Turkey often land in the exact same week, which earlier analysis in
+    # this project traced to a simultaneous activity burst rather than a
+    # clean causal sequence, so same-week hits are excluded from this cut).
+    def streak_conversion_stat(fw_level):
+        s_cutoff = max(weeks) - pd.Timedelta(weeks=STREAK_MATURATION_WEEKS)
+        eligible = fw_level[fw_level <= s_cutoff]
+        n = len(eligible)
+        if n == 0:
+            return {"eligible_n": 0, "pct_ever": 0.0, "pct_strictly_after": 0.0}
+        streak_week = fw_streak.reindex(eligible.index)
+        has_streak = streak_week.notna()
+        strictly_after = has_streak & (streak_week > eligible)
+        return {
+            "eligible_n": int(n),
+            "pct_ever": round(100 * has_streak.mean(), 1),
+            "pct_strictly_after": round(100 * strictly_after.mean(), 1)
+        }
+
+    streak_conversion = {
+        "maturation_weeks": STREAK_MATURATION_WEEKS,
+        "as_of_week": max(weeks).strftime('%Y-%m-%d'),
+        "frog": streak_conversion_stat(fw_by_level['Frog LVL 6']),
+        "turkey": streak_conversion_stat(fw_by_level['Turkey LVL 10'])
+    }
+
+    # 4) Retention guardrail: plain 1-week-forward retention, computed fresh
+    # from this same dataset (not Discord's native export) so it's a real
+    # weekly time series rather than the two static lifetime curves
+    # prepost_retention already has. Last week is left out since there's no
+    # "next week" yet to check it against.
+    week_sets = {w: set(df.loc[df['Week Start'] == w, 'Discord ID']) for w in weeks}
+    retention_weekly = []
+    for i in range(len(weeks) - 1):
+        w, wn = weeks[i], weeks[i + 1]
+        a, an = week_sets[w], week_sets[wn]
+        pct = round(100 * len(a & an) / len(a), 1) if a else None
+        retention_weekly.append({"week": w.strftime('%Y-%m-%d'), "week_label": w.strftime('%b %-d, %Y'), "pct": pct})
+
+    level_launch_success = {
+        "gorilla_leak_rate": {"maturation_weeks": GORILLA_MATURATION_WEEKS, "cohorts": gorilla_leak_cohorts},
+        "frog_turkey_conversion": {"maturation_weeks": FROG_TURKEY_MATURATION_WEEKS, "cohorts": frog_turkey_cohorts},
+        "streak_conversion": streak_conversion,
+        "retention_weekly": retention_weekly
+    }
+
     # pre/post narrative stats around the community-management cutoff, if we have data spanning both sides
     cutoff = pd.Timestamp(NARRATIVE_CUTOFF)
     pre_weeks = [w for w in weekly_base['Week Start'] if w < cutoff]
@@ -543,6 +648,7 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         },
         "membership_churn": membership_churn,
         "level_launch_tracking": level_launch_tracking,
+        "level_launch_success": level_launch_success,
         "events": events_out
     }
 
