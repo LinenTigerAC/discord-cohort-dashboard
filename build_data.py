@@ -37,6 +37,11 @@ Optional: --events-csv events.csv
     leadership, incident. See curated_events.csv for the existing list --
     add new rows to it as new events happen and re-pass it each week.
 
+Also always computed, no flag needed: Level Hoodie Rewards launch tracking
+(weekly new-achiever counts for Gorilla LVL 1 / Frog LVL 6 / Turkey LVL 10,
+the three tiers with a physical hoodie reward launched 2026-10-01). Update
+LEVEL_LAUNCH_DATE near the top of this file if that program changes again.
+
 Requirements: pip install pandas
 """
 import sys, json
@@ -57,14 +62,48 @@ DATA_LOSS_WEEKS = ['2026-06-22']
 # The community-management cutoff used for the pre/post narrative stats.
 NARRATIVE_CUTOFF = '2025-11-03'
 
+# Level Hoodie Rewards: physical hoodies tied to reaching these three ladder
+# tiers, launched to drive progression through the leveling system (see
+# levels_and_cosmetics_artist_brief.md). Tracked here as weekly first-time
+# achiever counts so a launch-week bump (or lack of one) is visible going
+# forward. Add more dates to LEVEL_LAUNCH_DATE's history if the program
+# changes again later -- for now it's a single launch event.
+LEVEL_LAUNCH_LEVELS = ['Gorilla LVL 1', 'Frog LVL 6', 'Turkey LVL 10']
+LEVEL_LAUNCH_DATE = '2026-10-01'
+
 def main(csv_paths, corrections_path=None, membership_csv_path=None, current_members=None, events_csv_path=None):
     if not csv_paths:
         print("Usage: python3 build_data.py export1.csv [export2.csv ...] [--corrections corrections.csv] "
               "[--membership-csv joins_leaves.csv --current-members 442034]")
         sys.exit(1)
 
-    frames = [pd.read_csv(p) for p in csv_paths]
+    # Discord ID MUST be read as a string, not inferred. A handful of rows in
+    # every export (Google Sheets mangling a big-number cell) store the ID in
+    # scientific notation, e.g. "1.27251E+18" instead of the real 18-19 digit
+    # snowflake. That forces pandas to infer the WHOLE column as float64 for
+    # that file -- and pandas' default (fast, not correctly-rounded) CSV float
+    # parser then mis-parses the perfectly good IDs too, by a different wrong
+    # amount for each value. A user active across more than one quarterly
+    # export ends up with a DIFFERENT float per file, splitting one real
+    # person into two "identities" after concat. Any cross-week/cross-file
+    # per-user aggregation (activation, overlap, stickiness, retention, this
+    # file's level-launch tracking) is corrupted by this if dtype isn't
+    # pinned to str. Same-week-only metrics (active_users, total_messages per
+    # week) are unaffected since those never need to match an ID across files.
+    frames = [pd.read_csv(p, dtype={'Discord ID': str}) for p in csv_paths]
     df = pd.concat(frames, ignore_index=True)
+
+    # Drop rows whose Discord ID didn't survive export as a plain digit string
+    # (the scientific-notation rows above). The true ID can't be recovered
+    # from "1.27251E+18" -- it could be any of ~10 quadrillion values -- so
+    # these are dropped rather than guessed. This is a tiny, fixed slice of
+    # the data (consistently ~0.03% of rows across every file so far).
+    bad_id_mask = ~df['Discord ID'].str.match(r'^\d+$', na=False)
+    if bad_id_mask.any():
+        print(f"Dropped {bad_id_mask.sum()} rows with an unrecoverable (scientific-notation) "
+              f"Discord ID -- a Google Sheets export artifact, not a Statbot issue.")
+        df = df[~bad_id_mask]
+
     df['Week Start'] = pd.to_datetime(df['Week Start'])
     df = df.sort_values('Week Start')
 
@@ -348,6 +387,34 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
             entry[c] = int(r[c])
         ladder_history.append(entry)
 
+    # ---------- Level Hoodie Rewards launch tracking ----------
+    # For each tracked level, find each user's first-ever week holding that
+    # role, then count new achievers per week. This measures the FLOW into
+    # each tier (did more people cross the line this week), not the standing
+    # population ladder_history already covers. Reliable back to week one --
+    # unlike Verified, these role flags are not retroactively backfilled, and
+    # first-week counts decay smoothly from the dataset's start rather than
+    # jumping at a launch date, which is what confirmed that for the Verified
+    # bug's post-mortem.
+    first_week_by_level = {}
+    for lvl in LEVEL_LAUNCH_LEVELS:
+        sub = df[df[lvl] == True][['Discord ID', 'Week Start']]
+        first_week_by_level[lvl] = sub.groupby('Discord ID')['Week Start'].min()
+
+    level_launch_weekly = []
+    for w in sorted(weeks_set_full):
+        entry = {"week": w.strftime('%Y-%m-%d'), "week_label": w.strftime('%b %-d, %Y')}
+        for lvl in LEVEL_LAUNCH_LEVELS:
+            key = lvl.split(' LVL')[0].lower()
+            entry[f'{key}_new'] = int((first_week_by_level[lvl] == w).sum())
+        level_launch_weekly.append(entry)
+
+    level_launch_tracking = {
+        "launch_date": LEVEL_LAUNCH_DATE,
+        "levels": LEVEL_LAUNCH_LEVELS,
+        "weekly": level_launch_weekly
+    }
+
     # pre/post narrative stats around the community-management cutoff, if we have data spanning both sides
     cutoff = pd.Timestamp(NARRATIVE_CUTOFF)
     pre_weeks = [w for w in weekly_base['Week Start'] if w < cutoff]
@@ -475,6 +542,7 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
             "narrative_stats": narrative_stats
         },
         "membership_churn": membership_churn,
+        "level_launch_tracking": level_launch_tracking,
         "events": events_out
     }
 

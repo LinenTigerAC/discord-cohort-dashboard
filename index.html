@@ -285,6 +285,20 @@
     grid-template-columns:repeat(auto-fit, minmax(280px,1fr));
     gap:16px;
   }
+
+  /* ---------- Level Hoodie Launch tracking ---------- */
+  .launch-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(260px,1fr));
+    gap:16px;
+  }
+  .launch-grid .panel h3{
+    font-family:var(--mono);
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink-dim);
+    margin:0 0 10px;
+  }
   .note-card{
     background:var(--bg-card);
     border:1px solid var(--line);
@@ -481,6 +495,7 @@
     <a href="#sec-tier">Message Sources</a>
     <a href="#sec-movers">Movers</a>
     <a href="#sec-notes">Field Notes</a>
+    <a href="#sec-launch">Hoodie Launch</a>
     <span class="section-nav-divider"></span>
     <a href="#yoy-section">Year in Review</a>
     <a href="#churn-section">Churn</a>
@@ -565,6 +580,17 @@
     <div class="section-head"><span class="section-num">08</span><h2>Field Notes</h2></div>
     <div class="section-desc">Automatically surfaced patterns worth a second look — read alongside the panels above, not instead of them.</div>
     <div class="notes-grid" id="notes-grid"></div>
+  </div>
+
+  <!-- 09 Level Hoodie Launch tracking -->
+  <div class="section" id="sec-launch">
+    <div class="section-head"><span class="section-num">09</span><h2>Level Hoodie Launch</h2></div>
+    <div class="section-desc">Physical hoodie rewards for Gorilla LVL 1, Frog LVL 6, and Turkey LVL 10 launched Oct 1, 2026 (dashed line), to drive progression through the leveling ladder — see the Field Notes brief for why these three. Each panel is weekly <b>new</b> achievers of that level (first time ever reaching it), not the standing population, so a launch-week bump shows up directly as a spike right after the line.</div>
+    <div class="launch-grid">
+      <div class="panel"><h3>🦍 Gorilla LVL 1</h3><div class="chart-box short"><canvas id="gorillaLaunchChart"></canvas></div></div>
+      <div class="panel"><h3>🐸 Frog LVL 6</h3><div class="chart-box short"><canvas id="frogLaunchChart"></canvas></div></div>
+      <div class="panel"><h3>🦃 Turkey LVL 10</h3><div class="chart-box short"><canvas id="turkeyLaunchChart"></canvas></div></div>
+    </div>
   </div>
 
   <!-- YoY hero section (collapsed by default -- deep history, not weekly-actionable) -->

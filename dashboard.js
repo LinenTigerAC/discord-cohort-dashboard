@@ -37,6 +37,7 @@ const cohorts = DATA.cohorts;
 const tierDist = DATA.animal_tier_distribution;
 const tierNames = DATA.animal_tier_names;
 const newRet = DATA.new_vs_returning;
+const levelLaunch = DATA.level_launch_tracking;
 
 const COLORS = {
   amber: '#E8A24C', amberDim:'#8A6A3E', moss:'#7FBF8F', rust:'#D9705C',
@@ -926,6 +927,72 @@ document.getElementById('notes-grid').innerHTML = notes.map(n=>`
     <div class="note-body">${n.body}</div>
   </div>
 `).join('');
+
+// ---------- 09 Level Hoodie Launch tracking ----------
+function levelLaunchMarkerPlugin(label){
+  return {
+    id: 'levelLaunchMarker',
+    afterDraw(chart){
+      const xScale = chart.scales.x;
+      const {top, bottom, right} = chart.chartArea;
+      const idx = levelLaunch.weekly.length; // launch falls just after the last available week
+      let x = xScale.getPixelForValue(idx);
+      if (!isFinite(x) || x > right) x = right;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = COLORS.rust;
+      ctx.setLineDash([4,3]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, top);
+      ctx.lineTo(x, bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = COLORS.rust;
+      ctx.font = "10px 'JetBrains Mono'";
+      ctx.textAlign = 'right';
+      ctx.fillText(label, x-5, top+11);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+  };
+}
+
+function renderLevelLaunchCharts(){
+  if (!levelLaunch) return;
+  const llLabels = levelLaunch.weekly.map(w=>w.week_label);
+  const specs = [
+    {canvas:'gorillaLaunchChart', key:'gorilla_new', color: COLORS.amber, name:'🦍 Gorilla LVL 1'},
+    {canvas:'frogLaunchChart', key:'frog_new', color: COLORS.moss, name:'🐸 Frog LVL 6'},
+    {canvas:'turkeyLaunchChart', key:'turkey_new', color: COLORS.violet, name:'🦃 Turkey LVL 10'}
+  ];
+  specs.forEach(spec=>{
+    const el = document.getElementById(spec.canvas);
+    if (!el) return;
+    new Chart(el, {
+      type:'line',
+      plugins: [levelLaunchMarkerPlugin('Hoodie launch')],
+      data:{
+        labels: llLabels,
+        datasets:[{
+          label: spec.name + ' — new achievers/week',
+          data: levelLaunch.weekly.map(w=>w[spec.key]),
+          borderColor: spec.color, backgroundColor: spec.color+'14',
+          fill:true, tension:0.3, pointRadius:0, borderWidth:2
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{callbacks:{title:(items)=>items[0].label}} },
+        scales:{
+          x:{ grid:{display:false}, ticks:{maxTicksLimit:6} },
+          y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'new this week'} }
+        }
+      }
+    });
+  });
+}
+renderLevelLaunchCharts();
 
 // ---------- Detail view ----------
 let detailChartInstance = null;
