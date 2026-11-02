@@ -307,6 +307,26 @@
     margin:28px 0 6px;
   }
   .launch-sub-head:first-of-type{ margin-top:4px; }
+
+  /* ---------- Community Events ---------- */
+  .event-block{
+    padding-top:28px;
+    margin-top:28px;
+    border-top:1px solid var(--line);
+  }
+  .event-block:first-child{ padding-top:0; margin-top:0; border-top:none; }
+  .event-block h3.event-title{
+    font-family:var(--serif);
+    font-size:20px;
+    font-weight:600;
+    margin:0 0 4px;
+  }
+  .event-block .event-dates{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--ink-dim);
+    margin:0 0 18px;
+  }
   .note-card{
     background:var(--bg-card);
     border:1px solid var(--line);
@@ -508,6 +528,7 @@
     <a href="#yoy-section">Year in Review</a>
     <a href="#churn-section">Churn</a>
     <a href="#launch-success-section">Launch Metrics</a>
+    <a href="#community-events-section">Community Events</a>
     <a href="#eventlog-section">Event Log</a>
   </nav>
 
@@ -661,6 +682,18 @@
       <h3 class="launch-sub-head">Guardrail — is overall retention holding steady?</h3>
       <div class="section-desc">Plain week-to-week retention, computed fresh from this data (not a lifetime curve): of this week's active members, what % show up again the following week. If the push toward streak-chasing starts costing more than it earns, this is where it would show up first.</div>
       <div class="panel"><div class="chart-box short"><canvas id="retentionWeeklyChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- Community gameplay events (collapsed by default) -->
+  <div class="section" id="community-events-section">
+    <div class="section-head collapsible-head" onclick="toggleSection('community-events-body', this)">
+      <span class="section-num">★</span><h2>Community Events</h2>
+      <span class="collapse-icon">▸ expand</span>
+    </div>
+    <div class="collapsible-body" id="community-events-body">
+      <div class="section-desc">Gameplay events run just for this community — boss-rush leaderboards and the like. Each event's participant list is cross-referenced against the same cohort data as every other section here, to see who actually shows up, not just how many.</div>
+      <div id="community-events-list"></div>
     </div>
   </div>
 

@@ -149,7 +149,8 @@ const EVENT_COLORS = {
   application_cycle: COLORS.inkDim,
   game_update: COLORS.inkFaint,
   leadership: COLORS.rust,
-  incident: COLORS.rust
+  incident: COLORS.rust,
+  community_event: COLORS.amber
 };
 const fhDates = fh.map(w => new Date(w.week).getTime());
 function nearestFhIndex(dateStr){
@@ -380,7 +381,8 @@ const CATEGORY_LABELS = {
   application_cycle: 'Applications',
   game_update: 'Game update',
   leadership: 'Leadership',
-  incident: 'Incident'
+  incident: 'Incident',
+  community_event: 'Community event'
 };
 if (events.length) {
   const sortedEvents = [...events].sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -1115,6 +1117,405 @@ function renderLaunchSuccessMetrics(){
   }
 }
 renderLaunchSuccessMetrics();
+
+// ---------- 10 Community gameplay events ----------
+const LEVEL_BUCKET_ORDER = ['No role at all', 'Animals only (no tier)', ...ANIMAL_COLS];
+const LEVEL_BUCKET_SHORT = {
+  'No role at all': 'No role', 'Animals only (no tier)': 'Animals only',
+  'Gorilla LVL 1':'🦍 Gorilla', 'Cat LVL 2':'🐱 Cat', 'Mole LVL 3':'🦔 Mole', 'Racoon LVL 4':'🦝 Racoon',
+  'Bunny LVL 5':'🐰 Bunny', 'Frog LVL 6':'🐸 Frog', 'Turkey LVL 10':'🦃 Turkey', 'Bat LVL 15':'🦇 Bat',
+  'Deer LVL 20':'🦌 Deer', 'Tiger LVL 30':'🐯 Tiger', 'Capybara LVL 40':'🦫 Capybara',
+  'Chameleon LVL 50':'🦎 Chameleon', 'Duck LVL 60':'🦆 Duck', 'Rat LVL 70':'🐀 Rat',
+  'Crow LVL 80':'🐦‍⬛ Crow', 'T-Rex LVL 90':'🦖 T-Rex'
+};
+
+function renderCommunityEvents(){
+  const events = DATA.community_events || [];
+  const container = document.getElementById('community-events-list');
+  if (!container) return;
+  if (!events.length){
+    container.innerHTML = '<div class="section-desc">No community events logged yet.</div>';
+    return;
+  }
+
+  container.innerHTML = events.map((ev, i) => {
+    const startLabel = new Date(ev.start_date + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    const endLabel = new Date(ev.end_date + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+    const chatMsgsRatio = ev.population_baseline_avg_msgs ? (ev.participant_baseline_avg_msgs / ev.population_baseline_avg_msgs) : null;
+
+    const tierRows = ev.tier_breakdown.map(t => {
+      const tierName = {top3:'🏆 Top 3', top10:'🥈 Top 10', participant:'Participant'}[t.tier] || t.tier;
+      return `
+      <div class="stat">
+        <div class="label">${tierName}</div>
+        <div class="value">${fmt(t.n)}</div>
+        <div class="sub">score ${fmt(t.min_score)}&ndash;${fmt(t.max_score)}</div>
+      </div>`;
+    }).join('');
+
+    const shortDate = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+
+    let chatAfterHtml;
+    const ca = ev.chat_after;
+    if (ca) {
+      const gActive = ca.groups.find(g => g.key === 'active_0_1wk');
+      const gDorm = ca.groups.find(g => g.key === 'dormant_5_12wk');
+      const mult = (gDorm && gDorm.control_pct) ? (gDorm.chatted_pct / gDorm.control_pct) : null;
+      const wkTxt = ca.main_weeks.map(shortDate).join(' & ');
+      chatAfterHtml = `
+      <div class="section-desc">Showing up to play isn't the same as chatting. For each group below: the share who sent at least one message in the main event week (week of ${wkTxt}), next to non-players who were equally quiet going in — a yardstick for what would have happened anyway.</div>
+      <div class="stat-strip" style="margin-bottom:20px;">
+        <div class="stat">
+          <div class="label">Players who chatted</div>
+          <div class="value">${fmt(ca.all_participants.chatted_n)}</div>
+          <div class="sub">${ca.all_participants.chatted_pct}% of ${fmt(ca.all_participants.n)} players</div>
+        </div>
+        <div class="stat">
+          <div class="label">Outside-core players who chatted</div>
+          <div class="value">${fmt(ca.outside_core_5wk_plus_or_never.chatted_n)}</div>
+          <div class="sub">${ca.outside_core_5wk_plus_or_never.chatted_pct}% of ${fmt(ca.outside_core_5wk_plus_or_never.n)} who were quiet 5+ wks or never chatted</div>
+        </div>
+        <div class="stat">
+          <div class="label">Already-active players who chatted</div>
+          <div class="value">${gActive ? gActive.chatted_pct+'%' : '—'}</div>
+          <div class="sub">${gActive ? fmt(gActive.chatted_n)+' of '+fmt(gActive.n) : ''}</div>
+        </div>
+      </div>
+      <div class="panel"><div class="chart-box short"><canvas id="ce${i}-chatAfterChart"></canvas></div></div>
+      <div class="notes-grid" style="margin:20px 0 28px;">
+        <div class="note-card">
+          <span class="note-tag ${ca.outside_core_5wk_plus_or_never.chatted_pct >= 20 ? 'opp' : 'watch'}">${ca.outside_core_5wk_plus_or_never.chatted_pct < 50 ? 'Most outside-core players played without chatting' : 'Most outside-core players also chatted'}</span>
+          <div class="note-body">Of the <b>${fmt(ca.outside_core_5wk_plus_or_never.n)}</b> players who were quiet 5+ weeks or had never chatted, <b>${fmt(ca.outside_core_5wk_plus_or_never.chatted_n)}</b> (${ca.outside_core_5wk_plus_or_never.chatted_pct}%) chatted in the main event week.${mult ? ` That is about <b>${mult.toFixed(0)}×</b> the rate of equally quiet members who didn't play (${gDorm.chatted_pct}% vs. ${gDorm.control_pct}% for the 5&ndash;12 week group), so the event is pulling some people back — but the yardstick is generous, since people who play are likely more engaged to begin with.` : ''}</div>
+        </div>
+      </div>`;
+    } else {
+      chatAfterHtml = `<div class="section-desc" style="margin-top:0;">Pending — needs a Statbot week that falls mostly (4+ days) inside this event, ${startLabel}&ndash;${endLabel}.</div>`;
+    }
+
+    let chatImpactHtml;
+    const ct = ev.chat_trajectory;
+    if (ct && ct.in_event_window.some(Boolean)) {
+      const li = ct.weeks.length - 1;
+      const nb = ct.n_baseline_weeks;
+      const pA = ct.participants.active_idx[li], oA = ct.others.active_idx[li];
+      const pM = ct.participants.msgs_idx[li], oM = ct.others.msgs_idx[li];
+      const preGap = ct.participants.active_idx[nb-1] - ct.others.active_idx[nb-1];
+      const nowGap = pA - oA;
+      const gapChange = nowGap - preGap;
+      const gapText = gapChange > 10
+        ? `That gap is <b>${Math.round(gapChange)} points wider</b> than it was in the last week before the event — worth watching, but it could still be seasonality or the fact that event-goers are simply more engaged people.`
+        : `But that gap was already there <i>before</i> the event (${Math.round(ct.participants.active_idx[nb-1])}% vs. ${Math.round(ct.others.active_idx[nb-1])}% in the last pre-event week) and hasn't meaningfully widened since (${gapChange>=0?'+':''}${Math.round(gapChange)} points). So this can't be credited to the event yet.`;
+      const overlapText = (ev.overlaps_events && ev.overlaps_events.length)
+        ? ` This event overlapped with <b>${ev.overlaps_events.join(', ')}</b>, so their effects can't be separated.` : '';
+      chatImpactHtml = `
+        <div class="stat-strip" style="margin-bottom:20px;">
+          <div class="stat">
+            <div class="label">Participants still chatting</div>
+            <div class="value">${Math.round(pA)}%</div>
+            <div class="sub">of their pre-event level, week of ${shortDate(ct.weeks[li])}</div>
+          </div>
+          <div class="stat">
+            <div class="label">Everyone else still chatting</div>
+            <div class="value">${Math.round(oA)}%</div>
+            <div class="sub">same measure, same week</div>
+          </div>
+          <div class="stat">
+            <div class="label">Participants' messages/person</div>
+            <div class="value">${Math.round(pM)}%</div>
+            <div class="sub">of their pre-event level</div>
+          </div>
+          <div class="stat">
+            <div class="label">Everyone else's messages/person</div>
+            <div class="value">${Math.round(oM)}%</div>
+            <div class="sub">same measure, same week</div>
+          </div>
+        </div>
+        <div class="panel"><div class="chart-box short"><canvas id="ce${i}-trajActiveChart"></canvas></div></div>
+        <div class="panel"><div class="chart-box short"><canvas id="ce${i}-trajMsgsChart"></canvas></div></div>
+        <div class="notes-grid" style="margin:20px 0 8px;">
+          <div class="note-card">
+            <span class="note-tag watch">Reading this honestly</span>
+            <div class="note-body">Event participants are holding up better than everyone else (${Math.round(pA)}% vs. ${Math.round(oA)}% of pre-event activity). ${gapText}${overlapText}</div>
+          </div>
+        </div>`;
+    } else {
+      chatImpactHtml = `<div class="section-desc" style="margin-top:0;">Pending — this event's window hasn't been covered by a Statbot export yet. This will populate automatically once a weekly export covering ${startLabel}–${endLabel} is loaded.</div>`;
+    }
+
+    return `
+    <div class="event-block">
+      <h3 class="event-title">${ev.title}</h3>
+      <div class="event-dates">${startLabel} &rarr; ${endLabel} &middot; event #${ev.event_id}</div>
+
+      <div class="stat-strip" style="margin-bottom:28px;">
+        <div class="stat">
+          <div class="label">Participants</div>
+          <div class="value">${fmt(ev.n_participants)}</div>
+          <div class="sub">equal to ${ev.pct_of_pre_event_active}% of a normal pre-event week's chatters</div>
+        </div>
+        <div class="stat">
+          <div class="label">Still in Discord</div>
+          <div class="value">${ev.in_server_data_reliable ? ev.in_server_pct+'%' : 'n/a'}</div>
+          <div class="sub">${ev.in_server_data_reliable ? fmt(ev.in_server_n)+' of '+fmt(ev.n_participants)+', as of this export' : "this export's in-server flag looks broken (every row said \"no\") — not shown"}</div>
+        </div>
+        <div class="stat">
+          <div class="label">No prior chat history</div>
+          <div class="value">${ev.pct_no_message_history}%</div>
+          <div class="sub">${fmt(ev.n_unmatched_no_message_history)} hadn't chatted in any week before the event started</div>
+        </div>
+        <div class="stat">
+          <div class="label">Already-engaged baseline</div>
+          <div class="value">${chatMsgsRatio ? chatMsgsRatio.toFixed(1)+'×' : '—'}</div>
+          <div class="sub">participants' own pre-event message rate vs. everyone else's</div>
+        </div>
+      </div>
+
+      <h3 class="launch-sub-head">Who shows up?</h3>
+      <div class="section-desc">Where event participants sit on the leveling ladder right now, compared to a typical recently-active member. Bars well above the baseline mean this event is drawing people who are already deep into the progression system, not pulling in people stuck lower on the ladder.</div>
+      <div class="panel"><div class="chart-box" style="height:360px;"><canvas id="ce${i}-ladderChart"></canvas></div></div>
+
+      <h3 class="launch-sub-head">Already-engaged, not new blood</h3>
+      <div class="section-desc">Role membership and baseline chat volume among participants, compared to the typical recently-active member (baseline weeks: ${ev.baseline_weeks[0]} through ${ev.baseline_weeks[ev.baseline_weeks.length-1]}, right before this event started).</div>
+      <div class="stat-strip" style="margin-bottom:20px;">
+        <div class="stat">
+          <div class="label">Verified</div>
+          <div class="value">${ev.participant_verified_pct}%</div>
+          <div class="sub">vs. ${ev.population_verified_pct}% of typical active members</div>
+        </div>
+        <div class="stat">
+          <div class="label">Any Creator tier</div>
+          <div class="value">${ev.participant_creator_pct}%</div>
+          <div class="sub">vs. ${ev.population_creator_pct}% of typical active members</div>
+        </div>
+        <div class="stat">
+          <div class="label">Alpha Crew</div>
+          <div class="value">${ev.participant_alpha_pct}%</div>
+          <div class="sub">vs. ${ev.population_alpha_pct}% of typical active members</div>
+        </div>
+      </div>
+      <div class="notes-grid" style="margin-bottom:28px;">
+        <div class="note-card">
+          <span class="note-tag opp">Reach the chat system misses</span>
+          <div class="note-body">${ev.pct_no_message_history}% of participants (${fmt(ev.n_unmatched_no_message_history)} people) had <b>not chatted in any week before the event</b>${ev.no_prior_now_chatting_n ? ` (${fmt(ev.no_prior_now_chatting_n)} of them have posted since)` : ''} — they showed up to play without being chatters. A gameplay event is reaching a slice of the server that the leveling ladder and hoodie program, which are both built on chat activity, structurally can't see.</div>
+        </div>
+        <div class="note-card">
+          <span class="note-tag watch">${chatMsgsRatio && chatMsgsRatio >= 1.8 ? 'Mostly your regulars, for the rest' : 'A broader mix than your regulars'}</span>
+          <div class="note-body">Among participants who <i>do</i> have chat history, they were already messaging <b>${chatMsgsRatio ? chatMsgsRatio.toFixed(1) : '?'}×</b> as much as a typical active member before the event even started (median ${fmt(ev.participant_baseline_median_msgs)} vs. ${fmt(ev.population_baseline_median_msgs)} messages/week). ${chatMsgsRatio && chatMsgsRatio >= 1.8
+            ? 'Outside of the no-history group above, this event is mostly engaging people who were already your most active chatters, not converting quieter members into chatters.'
+            : 'That is only a modest step up, so unlike a smaller event this one is reaching well beyond your heaviest chatters.'}</div>
+        </div>
+      </div>
+
+      <h3 class="launch-sub-head">Reactivation — who's coming back?</h3>
+      <div class="section-desc">Of participants who had chatted at some point before the event, how long had it been since they last chatted, measured as of the last full week before the event started (week of ${shortDate(ev.dormancy_anchor_week)}). Measuring from before the event means anyone the event itself woke up still counts as lapsed, and these numbers won't shift as new weeks load. Buckets further right are longer-lapsed, harder winbacks.</div>
+      <div class="panel"><div class="chart-box short"><canvas id="ce${i}-reactivationChart"></canvas></div></div>
+      <div class="notes-grid" style="margin:20px 0 28px;">
+        <div class="note-card">
+          <span class="note-tag opp">${fmt(ev.winback_n)} winback candidates</span>
+          <div class="note-body"><b>${ev.winback_pct_of_participants}%</b> of all participants (${fmt(ev.winback_n)} people) hadn't chatted in 5+ weeks before this event${ev.in_server_data_reliable ? ` — and <b>${fmt(ev.winback_in_server_n)}</b> of those ${fmt(ev.winback_n)} are still in the server right now` : ''}. Combined with the ${ev.pct_no_message_history}% who hadn't chatted before at all, roughly ${Math.round(ev.winback_pct_of_participants + ev.pct_no_message_history)}% of this event's turnout came from outside the already-active core.</div>
+        </div>
+        <div class="note-card">
+          <span class="note-tag watch">Mostly casual chatters, not lost regulars</span>
+          <div class="note-body">The longest-lapsed group (13+ weeks quiet) were mostly light chatters even back when active — a median of ${ev.reactivation_breakdown[3].hist_avg_msgs_median!=null ? fmt1(ev.reactivation_breakdown[3].hist_avg_msgs_median) : '?'} messages/week on average, ${ev.reactivation_breakdown[3].hist_max_msgs_median!=null ? fmt(ev.reactivation_breakdown[3].hist_max_msgs_median) : '?'} at their single busiest week. This reads as re-engaging drifted casual members, not winning back lost top contributors.</div>
+        </div>
+      </div>
+
+      <h3 class="launch-sub-head">Who actually chatted?</h3>
+      ${chatAfterHtml}
+
+      <h3 class="launch-sub-head">Did they stick around?</h3>
+      <div class="section-desc">The real test of a winback: do the reactivated and never-chatted participants above keep showing up after the event ends, or was this a one-off blip? Compared against participants who were already active going in, so a general up/down swing in the whole server isn't mistaken for this event's effect.</div>
+      ${ev.post_event_retention ? `
+      <div class="stat-strip" style="margin-bottom:28px;">
+        <div class="stat">
+          <div class="label">Winback (5+ wks dormant)</div>
+          <div class="value">${ev.post_event_retention.winback_5wk_plus.pct_returned}%</div>
+          <div class="sub">of ${fmt(ev.post_event_retention.winback_5wk_plus.n)} returned at least once after</div>
+        </div>
+        <div class="stat">
+          <div class="label">Long dormant (13+ wks)</div>
+          <div class="value">${ev.post_event_retention.long_dormant_13wk_plus.pct_returned}%</div>
+          <div class="sub">of ${fmt(ev.post_event_retention.long_dormant_13wk_plus.n)} returned at least once after</div>
+        </div>
+        <div class="stat">
+          <div class="label">Never chatted before</div>
+          <div class="value">${ev.post_event_retention.never_chatted_before.pct_returned}%</div>
+          <div class="sub">of ${fmt(ev.post_event_retention.never_chatted_before.n)} returned at least once after</div>
+        </div>
+        <div class="stat">
+          <div class="label">Already-active baseline</div>
+          <div class="value">${ev.post_event_retention.currently_active_baseline.pct_returned}%</div>
+          <div class="sub">of ${fmt(ev.post_event_retention.currently_active_baseline.n)}, for comparison</div>
+        </div>
+      </div>` : `
+      <div class="section-desc" style="margin-top:0;">Pending — no week after this event's end date (${endLabel}) has been loaded yet. This will populate automatically, and keep improving, as more post-event weekly exports come in.</div>`}
+
+      <h3 class="launch-sub-head">Reward tiers &amp; scores</h3>
+      <div class="section-desc">Score is this event's own in-game counter (boss kills). Rewards are tiered by rank, not by an absolute score threshold.</div>
+      <div class="stat-strip" style="margin-bottom:20px;">${tierRows}</div>
+      <div class="panel"><div class="chart-box short"><canvas id="ce${i}-scoreChart"></canvas></div></div>
+
+      <h3 class="launch-sub-head">Chat impact during the event</h3>
+      <div class="section-desc">Did chatting move for event participants differently than for everyone else? We take people who were regular chatters in the weeks before (chatted in 2+ of the 4 weeks before the baseline), split them into event participants vs. everyone else, and follow each group week by week. Each line is scaled so its own pre-event average = 100. "Messages per person" counts anyone who stopped chatting as zero, so it can't be flattered by only counting who's left.</div>
+      ${chatImpactHtml}
+    </div>`;
+  }).join('');
+
+  events.forEach((ev, i) => {
+    const ladderEl = document.getElementById(`ce${i}-ladderChart`);
+    if (ladderEl) {
+      const labels = LEVEL_BUCKET_ORDER.filter(l => (ev.participant_level_dist[l]||0) > 0 || (ev.population_level_dist[l]||0) > 0);
+      new Chart(ladderEl, {
+        type:'bar',
+        data:{
+          labels: labels.map(l => LEVEL_BUCKET_SHORT[l] || l),
+          datasets:[
+            {
+              label:'Event participants',
+              data: labels.map(l => ev.participant_level_dist[l] || 0),
+              backgroundColor: COLORS.amber
+            },
+            {
+              label:'Typical active member',
+              data: labels.map(l => ev.population_level_dist[l] || 0),
+              backgroundColor: COLORS.inkFaint
+            }
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          indexAxis:'y',
+          plugins:{ legend:{display:true, position:'top', labels:{boxWidth:12}} },
+          scales:{
+            x:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% of group'} },
+            y:{ grid:{display:false} }
+          }
+        }
+      });
+    }
+    const reactEl = document.getElementById(`ce${i}-reactivationChart`);
+    if (reactEl) {
+      new Chart(reactEl, {
+        type:'bar',
+        data:{
+          labels: ev.reactivation_breakdown.map(b=>b.label),
+          datasets:[{
+            label:'% of participants',
+            data: ev.reactivation_breakdown.map(b=>b.pct_of_participants),
+            backgroundColor: [COLORS.inkFaint, COLORS.inkDim, COLORS.amberDim, COLORS.rust]
+          }]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{
+              label:(item)=>{
+                const b = ev.reactivation_breakdown[item.dataIndex];
+                return `${fmt1(b.pct_of_participants)}% of participants (${fmt(b.n)} people)`;
+              }
+            }}
+          },
+          scales:{
+            x:{ grid:{display:false} },
+            y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% of participants'} }
+          }
+        }
+      });
+    }
+    const chatAfterEl = document.getElementById(`ce${i}-chatAfterChart`);
+    if (chatAfterEl && ev.chat_after) {
+      const gs = ev.chat_after.groups;
+      new Chart(chatAfterEl, {
+        type:'bar',
+        data:{
+          labels: gs.map(g => g.label),
+          datasets:[
+            { label:'Event players', data: gs.map(g => g.chatted_pct), backgroundColor: COLORS.amber },
+            { label:'Non-players, equally quiet going in', data: gs.map(g => g.control_pct == null ? null : g.control_pct), backgroundColor: COLORS.inkFaint }
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          interaction:{mode:'index', intersect:false},
+          plugins:{
+            legend:{display:true, position:'top', labels:{boxWidth:12}},
+            tooltip:{callbacks:{
+              label:(item)=>{
+                const g = gs[item.dataIndex];
+                if (item.datasetIndex === 0) return `Players: ${fmt1(g.chatted_pct)}% chatted (${fmt(g.chatted_n)} of ${fmt(g.n)})`;
+                return g.control_pct == null ? 'No comparison group' : `Non-players: ${fmt1(g.control_pct)}% chatted (of ${fmt(g.control_n)})`;
+              }
+            }}
+          },
+          scales:{
+            x:{ grid:{display:false} },
+            y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'% who chatted in the event week'} }
+          }
+        }
+      });
+    }
+    const scoreEl = document.getElementById(`ce${i}-scoreChart`);
+    if (scoreEl) {
+      new Chart(scoreEl, {
+        type:'bar',
+        data:{
+          labels: ev.score_hist.map(b=>b.bucket),
+          datasets:[{
+            label:'Participants',
+            data: ev.score_hist.map(b=>b.n),
+            backgroundColor: COLORS.violet
+          }]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false} },
+          scales:{
+            x:{ grid:{display:false}, title:{display:true,text:'score (boss kills)'} },
+            y:{ beginAtZero:true, grid:{color:COLORS.line}, title:{display:true,text:'participants'} }
+          }
+        }
+      });
+    }
+
+    const ct = ev.chat_trajectory;
+    if (ct && ct.in_event_window.some(Boolean)) {
+      const trajLabels = ct.weeks.map((w, k) => {
+        const d = new Date(w + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+        return ct.in_event_window[k] ? d + ' (event)' : d;
+      });
+      const mkTraj = (elId, key, title) => {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        new Chart(el, {
+          type:'line',
+          data:{
+            labels: trajLabels,
+            datasets:[
+              { label:`Event participants (${fmt(ct.participants.n)} people)`, data: ct.participants[key], borderColor: COLORS.amber, backgroundColor: COLORS.amber, tension:0.25, pointRadius:3, borderWidth:2.5 },
+              { label:`Everyone else (${fmt(ct.others.n)} people)`, data: ct.others[key], borderColor: COLORS.inkDim, backgroundColor: COLORS.inkDim, borderDash:[4,3], tension:0.25, pointRadius:3, borderWidth:2 }
+            ]
+          },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            interaction:{mode:'index', intersect:false},
+            plugins:{
+              legend:{display:true, position:'top', labels:{boxWidth:12}},
+              title:{display:true, text:title}
+            },
+            scales:{
+              x:{ grid:{display:false} },
+              y:{ grid:{color:COLORS.line}, title:{display:true, text:'pre-event average = 100'} }
+            }
+          }
+        });
+      };
+      mkTraj(`ce${i}-trajActiveChart`, 'active_idx', 'Share of the group that chatted at all, each week');
+      mkTraj(`ce${i}-trajMsgsChart`, 'msgs_idx', 'Messages per person (non-chatters count as zero), each week');
+    }
+  });
+}
+renderCommunityEvents();
 
 // ---------- Detail view ----------
 let detailChartInstance = null;
