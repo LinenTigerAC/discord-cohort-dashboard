@@ -90,7 +90,96 @@ const statStripHtml = `
     <div class="sub ${medianMsgChange>=0?'up':'down'}">${medianMsgChange>=0?'&uarr;':'&darr;'} ${fmt1(Math.abs(medianMsgChange))} vs. week 1</div>
   </div>
 `;
-document.getElementById('stat-strip').innerHTML = statStripHtml;
+const _oldStatStrip = document.getElementById('stat-strip');
+if (_oldStatStrip) _oldStatStrip.innerHTML = statStripHtml;   // replaced by the KPI Overview section below
+
+// ---------- KPI Overview (top of page) ----------
+function renderKpiOverview(){
+  const body = document.getElementById('kpi-overview-body');
+  const k = DATA.kpis;
+  if (!body || !k) return;
+  const A = k.activity, M = k.members, AC = k.alpha_crew, L = k.ladder;
+  const sd = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  const sdY = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  const has = (v) => v !== null && v !== undefined;
+  const sgn = (v) => !has(v) ? '' : (v >= 0 ? 'up' : 'down');
+  const ps = (v) => has(v) ? pctSigned(v) : '—';
+  const pts = (a, b) => (has(a) && has(b)) ? ((a-b>=0?'+':'') + (a-b).toFixed(1) + ' pts') : '—';
+  const tile = (label, value, sub, cls) => `
+    <div class="stat">
+      <div class="label">${label}</div>
+      <div class="value">${value}</div>
+      <div class="sub ${cls||''}">${sub}</div>
+    </div>`;
+  const group = (title, tilesHtml, readHtml) => `
+    <h3 class="launch-sub-head">${title}</h3>
+    <div class="stat-strip" style="margin-bottom:12px;">${tilesHtml}</div>
+    <div class="section-desc" style="margin:0 0 28px;">${readHtml}</div>`;
+
+  let html = `<div class="section-desc" style="margin-top:0;">Latest week: <b>${sdY(k.as_of_week)}</b>. Year over year compares each week to the same week a year earlier.</div>`;
+
+  // --- Group 1: size vs activity ---
+  const memberTile = M
+    ? tile(M.source === 'members_chart' ? 'Members' : 'Members (est.)', fmt(M.value), `${has(M.yoy_pct) ? ps(M.yoy_pct)+' YoY &middot; ' : ''}as of ${sd(M.as_of)}`, sgn(M.yoy_pct))
+    : tile('Members (est.)', '—', 'no membership data loaded', '');
+  const t1 = memberTile
+    + tile('Weekly chatters', fmt(A.chatters), `${ps(A.chatters_yoy_pct)} YoY &middot; 4-wk ${ps(A.chatters_4wk_yoy_pct)}`, sgn(A.chatters_yoy_pct))
+    + tile('Weekly messages', fmt(A.messages), `${ps(A.messages_yoy_pct)} YoY &middot; 4-wk ${ps(A.messages_4wk_yoy_pct)}`, sgn(A.messages_yoy_pct))
+    + tile('Messages per chatter', has(A.msgs_per_chatter) ? fmt1(A.msgs_per_chatter) : '—', `${ps(A.msgs_per_chatter_yoy_pct)} YoY &middot; median ${has(A.median) ? fmt1(A.median) : '—'}`, sgn(A.msgs_per_chatter_yoy_pct));
+  let read1 = '';
+  if (has(A.chatters_prior_year) && has(A.msgs_per_chatter_prior_year)) {
+    read1 += `A year ago this week had <b>${fmt(A.chatters_prior_year)}</b> chatters sending <b>${fmt1(A.msgs_per_chatter_prior_year)}</b> messages each; now it's <b>${fmt(A.chatters)}</b> sending <b>${fmt1(A.msgs_per_chatter)}</b>. `;
+  }
+  if (has(A.median) && has(A.median_prior_year)) {
+    read1 += (A.median === A.median_prior_year)
+      ? `The typical (median) chatter is unchanged at ${fmt1(A.median)} messages a week, so the extra volume comes from your heaviest posters, not broader participation. `
+      : `The typical (median) chatter moved from ${fmt1(A.median_prior_year)} to ${fmt1(A.median)} messages a week. `;
+  }
+  if (M && has(M.yoy_pct)) {
+    read1 += `Membership is <b>${ps(M.yoy_pct)}</b> YoY as of ${sd(M.as_of)}${has(M.same_date_chatters_yoy_pct) && has(M.same_date_messages_yoy_pct) ? `; over the 4 weeks to then, chatters were ${ps(M.same_date_chatters_yoy_pct)} and messages ${ps(M.same_date_messages_yoy_pct)}` : ''}. `;
+    if (has(M.decline_streak_weeks) && M.decline_streak_weeks >= 2) {
+      read1 += `<b>Membership has slipped ${M.decline_streak_weeks} weeks in a row</b>: ${fmt(Math.abs(M.since_peak))} below its ${sd(M.peak_week)} peak of ${fmt(M.peak_value)}${has(M.net_last_week) && M.net_last_week < 0 ? `, with ${fmt(Math.abs(M.net_last_week))} fewer last week` : ''}. `;
+    }
+    if (M.weeks_behind >= 2) {
+      read1 += `<b>Membership data is ${M.weeks_behind} weeks behind</b> (it ends ${sd(M.as_of)}); load a newer members export (Discord Insights, Members) to bring it current.`;
+    }
+  }
+  html += group('Size vs. activity', t1, read1);
+
+  // --- Group 2: Alpha Crew ---
+  if (AC) {
+    const t2 = tile('Alpha Crew chatting', fmt(AC.chatters), `${ps(AC.chatters_yoy_pct)} YoY${has(AC.chatters_prior_year) ? ' ('+fmt(AC.chatters_prior_year)+' last yr)' : ''}`, sgn(AC.chatters_yoy_pct))
+      + tile('Their messages', fmt(AC.messages), `${ps(AC.messages_yoy_pct)} YoY`, sgn(AC.messages_yoy_pct))
+      + tile('Share of all messages', AC.share_of_messages_pct + '%', `4-wk avg ${AC.share_4wk_pct}%${has(AC.share_prior_year_pct) ? ' &middot; '+AC.share_prior_year_pct+'% a year ago' : ''}`, has(AC.share_prior_year_pct) ? sgn(AC.share_of_messages_pct - AC.share_prior_year_pct) : '')
+      + tile('Median msgs / member', fmt(AC.median_member), `vs. ${fmt(AC.median_everyone_else)} for everyone else`, '');
+    const chatShare = A.chatters ? (100 * AC.chatters / A.chatters).toFixed(1) : null;
+    const read2 = `${chatShare ? `Alpha Crew is <b>${chatShare}%</b> of this week's chatters but <b>${AC.share_of_messages_pct}%</b> of its messages. ` : ''}`
+      + `<b>${fmt(AC.role_holders_seen)}</b> people have been seen with the role in Statbot (${fmt(AC.role_holders_active_8wk)} chatted in the last 8 weeks). That's a floor: Statbot only lists people in weeks they chat, so role holders who never chat don't appear, and Discord's own role count may be higher.`;
+    html += group('Alpha Crew', t2, read2);
+  }
+
+  // --- Group 3: level ladder + hoodies ---
+  if (L) {
+    const H = L.hoodie;
+    const t3 = tile('Messages from ladder members', has(L.share_of_messages_pct) ? L.share_of_messages_pct + '%' : '—',
+                    `${has(L.share_of_chatters_pct) ? L.share_of_chatters_pct+'% of chatters &middot; ' : ''}${pts(L.share_of_messages_pct, L.share_of_messages_prior_year_pct)} YoY`,
+                    has(L.share_of_messages_prior_year_pct) ? sgn(L.share_of_messages_pct - L.share_of_messages_prior_year_pct) : '')
+      + (H ? [['Gorilla LVL 1 new / wk', H.gorilla], ['Frog LVL 6 new / wk', H.frog], ['Turkey LVL 10 new / wk', H.turkey]].map(([lbl, g]) =>
+          tile(lbl, fmt1(g.post_avg), `${ps(g.change_pct)} vs. ${fmt1(g.pre_avg)} before launch`, sgn(g.change_pct))).join('') : '');
+    let read3 = `"Ladder members" = anyone holding a Gorilla LVL 1 or higher role. `;
+    if (H) {
+      const ldate = (DATA.level_launch_tracking && DATA.level_launch_tracking.launch_date) ? sd(DATA.level_launch_tracking.launch_date) : 'launch';
+      read3 += `Hoodie levels launched ${ldate}. The tiles compare the ${H.post_weeks} post-launch week${H.post_weeks===1?'':'s'} (average new achievers per week) with the ${H.pre_weeks} weeks before it. The launch week itself had Gorilla ${fmt(H.gorilla.launch_week)}, Frog ${fmt(H.frog.launch_week)}, Turkey ${fmt(H.turkey.launch_week)} new. `
+        + (H.post_weeks < 8 ? `That is too few weeks to call, and overall chat is falling this fall, which makes a lift harder to see, so read it as an early signal. ` : '')
+        + `Conversion detail is in Launch Metrics below.`;
+    }
+    html += group('Level ladder &amp; hoodies — is it working?', t3, read3);
+  }
+
+  body.innerHTML = html;
+}
+renderKpiOverview();
+
 document.getElementById('foot-rows').textContent = fmt(DATA.meta.total_rows);
 document.getElementById('foot-users').textContent = fmt(DATA.meta.unique_users);
 

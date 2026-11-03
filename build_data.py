@@ -30,6 +30,15 @@ Optional: --membership-csv joins_leaves.csv --current-members 442034
     rate rather than a joins-distorted one). If this file isn't provided,
     the Membership Churn section is simply omitted from the dashboard.
 
+Optional: --members-chart members_standing.csv
+    Weekly STANDING member counts (columns: timestamp, members) from Discord
+    Insights' member chart. Drives the Members card in the KPI Overview with
+    an actual current count and week-by-week trend. The year-ago comparison
+    bridges to the joins/leaves-based estimate above (re-anchored to this
+    file at their first overlapping week), so keep passing --membership-csv.
+    Without this file the Members card falls back to the joins/leaves
+    estimate, which goes stale whenever that export isn't refreshed.
+
 Optional: --events-csv events.csv
     Adds the Event Log section and timeline markers, from a CSV with columns:
     date, category, title, description. Category should be one of:
@@ -41,6 +50,19 @@ Also always computed, no flag needed: Level Hoodie Rewards launch tracking
 (weekly new-achiever counts for Gorilla LVL 1 / Frog LVL 6 / Turkey LVL 10,
 the three tiers with a physical hoodie reward launched 2026-10-01). Update
 LEVEL_LAUNCH_DATE near the top of this file if that program changes again.
+
+Optional: --community-events event1.csv [event2.csv ...]
+    Adds the Community Events section -- gameplay events run for the Discord
+    community (e.g. boss-rush leaderboards), one export per event, columns:
+    discord_id, username, count, rank, tier, in_server, roles_granted, error,
+    event_id, event_title, start_date, end_date. Each event's participant list
+    is cross-referenced against the cohort data above (by discord_id) to show
+    who actually shows up -- their existing roles/ladder level vs the general
+    population, how many have zero prior message history at all (a reach
+    gameplay events have that chat-based programs don't), and whether their
+    own chatting changed during the event window once that week's regular
+    Statbot export is available (it's left as "pending" until then). Pass
+    every event CSV you have each time, same as the quarterly cohort exports.
 
 Requirements: pip install pandas
 """
@@ -71,7 +93,173 @@ NARRATIVE_CUTOFF = '2025-11-03'
 LEVEL_LAUNCH_LEVELS = ['Gorilla LVL 1', 'Frog LVL 6', 'Turkey LVL 10']
 LEVEL_LAUNCH_DATE = '2026-10-01'
 
-def main(csv_paths, corrections_path=None, membership_csv_path=None, current_members=None, events_csv_path=None):
+def build_kpis(output, df):
+    """Headline KPIs for the overview strip at the top of the dashboard.
+    Computed from the already-assembled sections of `output` (so every KPI
+    here ties back to a number that is also shown further down the page).
+    Year-over-year compares each week to the same weekday 364 days earlier."""
+    def pct(a, b):
+        return round(100 * (a / b - 1), 1) if (a is not None and b) else None
+    def minus_year(wk):
+        return (pd.Timestamp(wk) - pd.Timedelta(days=364)).strftime('%Y-%m-%d')
+
+    ov = output['overall']
+    by = {r['week']: r for r in ov}
+    last = ov[-1]
+    lw = last['week']
+    pw = minus_year(lw)
+    prior = by.get(pw)
+
+    def trailing_yoy(end_week, n=4, field='total_messages'):
+        """Sum of the last n weeks ending at end_week vs. the matching weeks a
+        year earlier, skipping any pair where either week is a flagged
+        (data-loss / export-cap-corrected) week."""
+        idx = [r['week'] for r in ov].index(end_week)
+        cur = prv = 0
+        used = 0
+        for r in ov[max(0, idx - n + 1): idx + 1]:
+            p = by.get(minus_year(r['week']))
+            if not p or r.get('is_data_loss') or p.get('is_data_loss') or r.get('is_corrected') or p.get('is_corrected'):
+                continue
+            cur += r[field]; prv += p[field]; used += 1
+        return (pct(cur, prv), used) if used else (None, 0)
+
+    # ---- Activity vs. size ----
+    mpc = lambda r: (r['total_messages'] / r['active_users']) if r and r['active_users'] else None
+    activity = {
+        "week": lw,
+        "chatters": last['active_users'], "chatters_prior_year": prior['active_users'] if prior else None,
+        "chatters_yoy_pct": pct(last['active_users'], prior['active_users']) if prior else None,
+        "chatters_4wk_yoy_pct": trailing_yoy(lw, 4, 'active_users')[0],
+        "messages": last['total_messages'], "messages_prior_year": prior['total_messages'] if prior else None,
+        "messages_yoy_pct": pct(last['total_messages'], prior['total_messages']) if prior else None,
+        "messages_4wk_yoy_pct": trailing_yoy(lw, 4, 'total_messages')[0],
+        "msgs_per_chatter": round(mpc(last), 1) if mpc(last) else None,
+        "msgs_per_chatter_prior_year": round(mpc(prior), 1) if mpc(prior) else None,
+        "msgs_per_chatter_yoy_pct": pct(mpc(last), mpc(prior)) if prior else None,
+        "median": last.get('median_messages'), "median_prior_year": prior.get('median_messages') if prior else None,
+    }
+
+    # ---- Members ----
+    # Preferred source: weekly STANDING counts (--members-chart). The year-ago
+    # figure comes from the joins/leaves-based estimate, shifted so it lines up
+    # with the standing counts at their first overlapping week. Fallback: the
+    # joins/leaves estimate alone (goes stale if that export isn't refreshed).
+    members = None
+    mc = output.get('membership_churn') or {}
+    mw = mc.get('weekly') or []
+    series = output.get('members_series') or []
+    if series:
+        cur = series[-1]
+        est = {r['week']: r['est_standing_members'] for r in mw}
+        overlap = [r for r in series if r['week'] in est]
+        prior_val = None
+        if overlap:
+            offset = overlap[0]['members'] - est[overlap[0]['week']]
+            pv = est.get(minus_year(cur['week']))
+            prior_val = (pv + offset) if pv is not None else None
+        peak = max(series, key=lambda r: r['members'])
+        streak = 0
+        for i in range(len(series) - 1, 0, -1):
+            if series[i]['members'] < series[i - 1]['members']:
+                streak += 1
+            else:
+                break
+        members = {
+            "source": "members_chart",
+            "value": cur['members'], "as_of": cur['week'],
+            "prior_year_value": int(prior_val) if prior_val is not None else None,
+            "yoy_pct": pct(cur['members'], prior_val) if prior_val else None,
+            "weeks_behind": max(0, (pd.Timestamp(lw) - pd.Timestamp(cur['week'])).days // 7),
+            "peak_value": peak['members'], "peak_week": peak['week'],
+            "since_peak": cur['members'] - peak['members'],
+            "since_peak_pct": pct(cur['members'], peak['members']),
+            "decline_streak_weeks": streak,
+            "net_last_week": cur['members'] - series[-2]['members'] if len(series) > 1 else None,
+            "same_date_messages_yoy_pct": trailing_yoy(cur['week'], 4, 'total_messages')[0] if cur['week'] in by else None,
+            "same_date_chatters_yoy_pct": trailing_yoy(cur['week'], 4, 'active_users')[0] if cur['week'] in by else None,
+        }
+    elif mw:
+        m_last = mw[-1]
+        m_prior = next((r for r in mw if r['week'] == minus_year(m_last['week'])), None)
+        same_date_msgs = trailing_yoy(m_last['week'], 4, 'total_messages') if m_last['week'] in by else (None, 0)
+        same_date_chat = trailing_yoy(m_last['week'], 4, 'active_users') if m_last['week'] in by else (None, 0)
+        members = {
+            "value": m_last['est_standing_members'], "as_of": m_last['week'],
+            "prior_year_value": m_prior['est_standing_members'] if m_prior else None,
+            "yoy_pct": pct(m_last['est_standing_members'], m_prior['est_standing_members']) if m_prior else None,
+            "weeks_behind": (pd.Timestamp(lw) - pd.Timestamp(m_last['week'])).days // 7,
+            "same_date_messages_yoy_pct": same_date_msgs[0],
+            "same_date_chatters_yoy_pct": same_date_chat[0],
+        }
+
+    # ---- Alpha Crew ----
+    alpha = None
+    acs = {r['week']: r for r in (output['cohorts'].get('Alpha Crew') or [])}
+    if lw in acs:
+        a, ap = acs[lw], acs.get(pw)
+        tot4 = sum(by[r['week']]['total_messages'] for r in ov[-4:])
+        a4 = sum((acs.get(r['week']) or {}).get('total_msgs_member', 0) for r in ov[-4:])
+        role_ids = df[df['Alpha Crew']]['Discord ID']
+        recent_cut = pd.Timestamp(lw) - pd.Timedelta(weeks=7)
+        alpha = {
+            "chatters": a['members'], "chatters_prior_year": ap['members'] if ap else None,
+            "chatters_yoy_pct": pct(a['members'], ap['members']) if ap else None,
+            "messages": a['total_msgs_member'], "messages_prior_year": ap['total_msgs_member'] if ap else None,
+            "messages_yoy_pct": pct(a['total_msgs_member'], ap['total_msgs_member']) if ap else None,
+            "share_of_messages_pct": round(100 * a['total_msgs_member'] / last['total_messages'], 1),
+            "share_prior_year_pct": round(100 * ap['total_msgs_member'] / prior['total_messages'], 1) if (ap and prior) else None,
+            "share_4wk_pct": round(100 * a4 / tot4, 1) if tot4 else None,
+            "median_member": a['median_msg_member'], "median_everyone_else": a['median_msg_nonmember'],
+            # Statbot only lists people in weeks they chatted, so role holders who
+            # never chat are invisible here -- this is a floor, not a full roster.
+            "role_holders_seen": int(role_ids.nunique()),
+            "role_holders_active_8wk": int(df[(df['Alpha Crew']) & (df['Week Start'] >= recent_cut)]['Discord ID'].nunique()),
+        }
+
+    # ---- Level ladder / hoodie program ----
+    ladder = None
+    tc = output.get('tier_contribution')
+    if tc:
+        labels = tc['tier_bucket_labels']
+        level_labels = [l for l in labels if l not in ('No role at all', 'Animals only (no tier)')]
+        vol = {r['week']: r for r in tc['weekly_tier_volume']}
+        mem = {r['week']: r for r in tc['weekly_tier_members']}
+        def ladder_share(w):
+            if w not in vol or w not in mem:
+                return None, None
+            tv = sum(vol[w][l] for l in labels); tm = sum(mem[w][l] for l in labels)
+            return (round(100 * sum(vol[w][l] for l in level_labels) / tv, 1) if tv else None,
+                    round(100 * sum(mem[w][l] for l in level_labels) / tm, 1) if tm else None)
+        sm, sc = ladder_share(lw); psm, psc = ladder_share(pw)
+
+        hoodie = None
+        llt = output.get('level_launch_tracking')
+        if llt and llt.get('weekly'):
+            ld = pd.Timestamp(llt['launch_date'])
+            launch_week = (ld - pd.Timedelta(days=ld.weekday())).strftime('%Y-%m-%d')
+            wk = llt['weekly']
+            pre = [r for r in wk if r['week'] < launch_week][-4:]
+            post = [r for r in wk if r['week'] > launch_week]
+            lrow = next((r for r in wk if r['week'] == launch_week), None)
+            if pre and post:
+                def lvl(key):
+                    pa = sum(r[key] for r in pre) / len(pre); qa = sum(r[key] for r in post) / len(post)
+                    return {"pre_avg": round(pa, 1), "post_avg": round(qa, 1), "change_pct": pct(qa, pa),
+                            "launch_week": lrow[key] if lrow else None}
+                hoodie = {"launch_week": launch_week, "pre_weeks": len(pre), "post_weeks": len(post),
+                          "gorilla": lvl('gorilla_new'), "frog": lvl('frog_new'), "turkey": lvl('turkey_new')}
+        ladder = {
+            "share_of_messages_pct": sm, "share_of_chatters_pct": sc,
+            "share_of_messages_prior_year_pct": psm, "share_of_chatters_prior_year_pct": psc,
+            "hoodie": hoodie,
+        }
+
+    return {"as_of_week": lw, "activity": activity, "members": members, "alpha_crew": alpha, "ladder": ladder}
+
+
+def main(csv_paths, corrections_path=None, membership_csv_path=None, current_members=None, events_csv_path=None,
+         community_event_paths=None, members_chart_path=None):
     if not csv_paths:
         print("Usage: python3 build_data.py export1.csv [export2.csv ...] [--corrections corrections.csv] "
               "[--membership-csv joins_leaves.csv --current-members 442034]")
@@ -609,6 +797,349 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
                 "description": r['description']
             })
 
+    # ---------- Community gameplay events (optional) ----------
+    # Cross-references each event's participant list against the cohort data
+    # above (by Discord ID) to answer "who actually shows up to these," not
+    # just "how many." Uses each user's LATEST known row (across all weeks)
+    # for their current role/level state. Everything that is a "before the
+    # event" comparison (the typical-active comparison group, dormancy, the
+    # never-chatted split, chat history stats) is anchored PER EVENT to the
+    # last full week that ended before that event started -- never to the
+    # latest week loaded -- so the numbers don't drift (or get contaminated by
+    # the event's own effect) as more weeks arrive.
+    community_events_out = []
+    if community_event_paths:
+        latest_df = df.sort_values('Week Start').groupby('Discord ID').last()
+
+        def dormancy_bucket(w):
+            if w <= 1: return 'active_0_1wk'
+            if w <= 4: return 'recently_lapsed_2_4wk'
+            if w <= 12: return 'dormant_5_12wk'
+            return 'long_dormant_13wk_plus'
+        DORMANCY_LABELS = {
+            'active_0_1wk': 'Already active (0-1 wks)',
+            'recently_lapsed_2_4wk': 'Recently lapsed (2-4 wks)',
+            'dormant_5_12wk': 'Dormant (5-12 wks)',
+            'long_dormant_13wk_plus': 'Long dormant (13+ wks)'
+        }
+
+        def creator_any(frame):
+            return frame[['Creator','Creator Bean','Creator Bronze','Creator Silver',
+                           'Creator Gold','Creator Galaxy','Creator Mythic']].any(axis=1)
+
+        score_buckets = [(1,1,'1'), (2,5,'2-5'), (6,20,'6-20'), (21,100,'21-100'), (101,None,'100+')]
+        def bucket_score(n):
+            for lo, hi, label in score_buckets:
+                if hi is None:
+                    if n >= lo: return label
+                else:
+                    if lo <= n <= hi: return label
+            return str(n)
+
+        for path in community_event_paths:
+            ev_df = pd.read_csv(path, dtype={'discord_id': str})
+            if ev_df.empty:
+                continue
+            first = ev_df.iloc[0]
+            event_start = pd.Timestamp(first['start_date'])
+            event_end = pd.Timestamp(first['end_date'])
+            n_participants = len(ev_df)
+
+            # Pre-event chat-intensity baseline: the last 4 known weeks that
+            # END before this event started -- NOT just weeks whose start date
+            # is earlier, since a week starting before event_start can still
+            # run past it (e.g. event starts mid-week). Using a week that
+            # overlaps the event at all would silently fold the event's own
+            # in-progress effect into its own "before" baseline, understating
+            # any real change.
+            baseline_weeks = [w for w in weeks if (w + pd.Timedelta(days=6)) < event_start][-4:]
+
+            # Anchor = the last full week before the event. All "going in" stats
+            # use only rows up to and including this week.
+            weeks_list = list(weeks)
+            if baseline_weeks:
+                anchor_week = baseline_weeks[-1]
+                anchor_idx = weeks_list.index(anchor_week)
+                pre_df = df[df['week_idx'] <= anchor_idx]
+            else:
+                anchor_week, anchor_idx, pre_df = None, None, df.iloc[0:0]
+
+            # "Typical active member" comparison group = anyone who chatted in
+            # the 8 weeks up to the anchor week (not weeks during/after the event).
+            if anchor_week is not None:
+                recent_cutoff = anchor_week - pd.Timedelta(weeks=8)
+                recent_active_ids = set(pre_df[pre_df['Week Start'] >= recent_cutoff]['Discord ID'].unique())
+            else:
+                recent_active_ids = set()
+            pop_df = latest_df.loc[latest_df.index.isin(recent_active_ids)]
+            pop_level_dist = pop_df['tier_bucket'].value_counts(normalize=True).mul(100).round(1).to_dict()
+            pop_verified_pct = round(100 * pop_df['Verified'].mean(), 1) if len(pop_df) else 0
+            pop_alpha_pct = round(100 * pop_df['Alpha Crew'].mean(), 1) if len(pop_df) else 0
+            pop_creator_pct = round(100 * creator_any(pop_df).mean(), 1) if len(pop_df) else 0
+
+            anchor_active_users = int((df['week_idx'] == anchor_idx).sum()) if anchor_idx is not None else None
+
+            # Per-user pre-event history, for the dormancy / never-chatted split.
+            pre_last_seen = pre_df.groupby('Discord ID')['week_idx'].max()
+            pre_hist_avg = pre_df.groupby('Discord ID')['Weekly Messages'].mean()
+            pre_hist_max = pre_df.groupby('Discord ID')['Weekly Messages'].max()
+
+            pop_baseline_rows = df[df['Week Start'].isin(baseline_weeks) & df['Discord ID'].isin(recent_active_ids)]
+            pop_baseline_avg = round(pop_baseline_rows['Weekly Messages'].mean(), 1) if len(pop_baseline_rows) else 0
+            pop_baseline_median = float(pop_baseline_rows['Weekly Messages'].median()) if len(pop_baseline_rows) else 0
+
+            # A real event export has a mix of yes/no here. If EVERY row says
+            # "no" (or the column is entirely blank), that's an export/bot
+            # issue -- not every participant actually left the server -- so
+            # this is flagged as unreliable rather than reported as a real 0%.
+            in_server_yes_n = int((ev_df['in_server'] == 'yes').sum())
+            in_server_reliable = in_server_yes_n > 0
+            in_server_n = in_server_yes_n if in_server_reliable else None
+
+            tier_order = ['top3', 'top10', 'participant']
+            tier_breakdown = []
+            for t in tier_order:
+                sub = ev_df[ev_df['tier'] == t]
+                if len(sub) == 0:
+                    continue
+                tier_breakdown.append({
+                    "tier": t, "n": int(len(sub)),
+                    "min_score": int(sub['count'].min()), "max_score": int(sub['count'].max())
+                })
+
+            score_hist_counts = ev_df['count'].apply(bucket_score).value_counts()
+            score_hist = [{"bucket": lbl, "n": int(score_hist_counts.get(lbl, 0))} for _, _, lbl in score_buckets]
+
+            merged = ev_df.merge(latest_df, left_on='discord_id', right_index=True, how='left', suffixes=('', '_cohort'))
+            is_matched = merged['Week Start'].notna()
+            n_matched = int(is_matched.sum())
+            n_unmatched = int((~is_matched).sum())
+
+            matched = merged[is_matched]
+            participant_level_dist = matched['tier_bucket'].value_counts(normalize=True).mul(100).round(1).to_dict() if len(matched) else {}
+            participant_verified_pct = round(100 * matched['Verified'].mean(), 1) if len(matched) else 0
+            participant_alpha_pct = round(100 * matched['Alpha Crew'].mean(), 1) if len(matched) else 0
+            participant_creator_pct = round(100 * creator_any(matched).mean(), 1) if len(matched) else 0
+
+            participant_ids = set(ev_df['discord_id'])
+            part_baseline_rows = df[df['Week Start'].isin(baseline_weeks) & df['Discord ID'].isin(participant_ids)]
+            participant_baseline_avg = round(part_baseline_rows['Weekly Messages'].mean(), 1) if len(part_baseline_rows) else 0
+            participant_baseline_median = float(part_baseline_rows['Weekly Messages'].median()) if len(part_baseline_rows) else 0
+
+            # ---- Reactivation / winback breakdown ----
+            # For participants with SOME chat history BEFORE the event, how long
+            # had it been (as of the anchor week, the last full week before the
+            # event) since they were last seen chatting. Participants with no
+            # chat history before the event are counted separately
+            # (n_unmatched_no_message_history), even if they started chatting
+            # during or after the event.
+            prior = merged[merged['discord_id'].isin(pre_last_seen.index)].copy()
+            prior['last_seen_idx'] = prior['discord_id'].map(pre_last_seen)
+            prior['weeks_dormant'] = (anchor_idx - prior['last_seen_idx']) if anchor_idx is not None else 0
+            prior['hist_avg_msgs'] = prior['discord_id'].map(pre_hist_avg)
+            prior['hist_max_msgs'] = prior['discord_id'].map(pre_hist_max)
+            prior['dormancy_bucket'] = prior['weeks_dormant'].apply(dormancy_bucket)
+
+            n_no_prior = n_participants - len(prior)
+            no_prior_ids = set(ev_df['discord_id']) - set(prior['discord_id'])
+            # Of the no-prior-history group, how many show up chatting in any
+            # week AFTER the anchor week (during or after the event)?
+            if anchor_idx is not None:
+                post_anchor_ids = set(df[df['week_idx'] > anchor_idx]['Discord ID'].unique())
+            else:
+                post_anchor_ids = set(df['Discord ID'].unique())
+            no_prior_now_chatting_n = len(no_prior_ids & post_anchor_ids)
+
+            # ---- Who actually chatted during the event? ----
+            # "Main event weeks" = Statbot weeks with 4+ of their 7 days inside
+            # the event (so a week that only clips the event's first or last
+            # day doesn't count as "during"). For each going-in group, what
+            # share chatted in those weeks -- next to the same share for
+            # NON-participants who were equally quiet going in, as a yardstick
+            # for "would they have shown up anyway". (Players skew toward
+            # people who were more engaged historically, so the comparison
+            # flatters the event somewhat; it is a yardstick, not proof.)
+            def _overlap_days(w):
+                lo = max(w, event_start)
+                hi = min(w + pd.Timedelta(days=6), event_end)
+                return max(0, (hi - lo).days + 1)
+            main_weeks = [w for w in weeks if _overlap_days(w) >= 4 and anchor_idx is not None and weeks_list.index(w) > anchor_idx]
+            chat_after = None
+            if main_weeks:
+                main_idx = [weeks_list.index(w) for w in main_weeks]
+                chatted_main_ids = set(df[df['week_idx'].isin(main_idx)]['Discord ID'].unique())
+                participant_set = set(ev_df['discord_id'])
+                # Non-participants with prior history, bucketed by dormancy at the anchor
+                npart = pre_last_seen[~pre_last_seen.index.isin(participant_set)]
+                npart_bucket = (anchor_idx - npart).apply(dormancy_bucket)
+
+                def _grp(key, label, ids, control_ids):
+                    n = len(ids)
+                    c = len(ids & chatted_main_ids)
+                    out = {"key": key, "label": label, "n": n, "chatted_n": c,
+                           "chatted_pct": round(100 * c / n, 1) if n else None}
+                    if control_ids is not None:
+                        cn = len(control_ids)
+                        cc = len(control_ids & chatted_main_ids)
+                        out["control_n"] = cn
+                        out["control_pct"] = round(100 * cc / cn, 1) if cn else None
+                    return out
+
+                groups = []
+                for key, label in DORMANCY_LABELS.items():
+                    ids = set(prior[prior['dormancy_bucket'] == key]['discord_id'])
+                    ctrl = set(npart_bucket[npart_bucket == key].index)
+                    groups.append(_grp(key, label, ids, ctrl))
+                groups.append(_grp('no_prior', 'No chat before the event', set(no_prior_ids), None))
+
+                outside_ids = set(prior[prior['weeks_dormant'] >= 5]['discord_id']) | set(no_prior_ids)
+                chat_after = {
+                    "main_weeks": [w.strftime('%Y-%m-%d') for w in main_weeks],
+                    "all_participants": _grp('all', 'All participants', participant_set, None),
+                    "outside_core_5wk_plus_or_never": _grp('outside', 'Quiet 5+ weeks or never chatted', outside_ids, None),
+                    "groups": groups,
+                }
+
+            reactivation_breakdown = []
+            for key, label in DORMANCY_LABELS.items():
+                sub = prior[prior['dormancy_bucket'] == key]
+                reactivation_breakdown.append({
+                    "bucket": key, "label": label, "n": int(len(sub)),
+                    "pct_of_participants": round(100 * len(sub) / n_participants, 1) if n_participants else 0,
+                    "hist_avg_msgs_median": float(sub['hist_avg_msgs'].median()) if len(sub) else None,
+                    "hist_max_msgs_median": float(sub['hist_max_msgs'].median()) if len(sub) else None
+                })
+
+            winback_mask = prior['weeks_dormant'] >= 5
+            winback_ids = set(prior[winback_mask]['discord_id'])
+            long_dormant_ids = set(prior[prior['weeks_dormant'] >= 13]['discord_id'])
+            never_chatted_ids = no_prior_ids
+            winback_n = len(winback_ids)
+            winback_in_server_n = int(prior[winback_mask]['in_server'].eq('yes').sum()) if in_server_reliable else None
+
+            # ---- Post-event retention: did reactivated/never-chatted participants
+            # stick around, or was this a one-off blip? Only possible once a
+            # Statbot week strictly AFTER event_end has been loaded -- recomputed
+            # fresh from the event CSV + latest cohort data every time this runs,
+            # so it keeps improving as more post-event weeks arrive, with nothing
+            # persisted between runs.
+            post_event_weeks = [w for w in weeks if w > event_end]
+            post_event_retention = None
+            if post_event_weeks:
+                active_after_ids = set(df[df['Week Start'].isin(post_event_weeks)]['Discord ID'].unique())
+                def retention_pct(id_set):
+                    return round(100 * len(id_set & active_after_ids) / len(id_set), 1) if id_set else None
+                currently_active_ids_for_compare = set(prior[prior['dormancy_bucket']=='active_0_1wk']['discord_id'])
+                post_event_retention = {
+                    "weeks_used": [w.strftime('%Y-%m-%d') for w in post_event_weeks],
+                    "winback_5wk_plus": {"n": winback_n, "pct_returned": retention_pct(winback_ids)},
+                    "long_dormant_13wk_plus": {"n": len(long_dormant_ids), "pct_returned": retention_pct(long_dormant_ids)},
+                    "never_chatted_before": {"n": len(never_chatted_ids), "pct_returned": retention_pct(never_chatted_ids)},
+                    "currently_active_baseline": {"n": len(currently_active_ids_for_compare), "pct_returned": retention_pct(currently_active_ids_for_compare)}
+                }
+
+            # ---- Chat trajectory: a FIXED group, tracked week by week ----
+            # (Replaces an earlier "avg messages per chatter" comparison, which
+            # swung wildly depending on who happened to be in the comparison
+            # pool, because it only averages people who chatted that week.)
+            # Group = "regular chatters going in": people who chatted in at
+            # least 2 of the 4 weeks right BEFORE the baseline window (chosen
+            # from weeks before the weeks being measured, so being selected
+            # for "was chatting" doesn't mechanically inflate the baseline).
+            # Split into event participants vs. everyone else in that group.
+            # For each week from the start of the baseline window onward we
+            # track (a) the share of the group that chatted at all, and
+            # (b) messages per person INCLUDING people who sent zero.
+            # Event weeks are flagged. Index to the pre-event average = 100.
+            chat_trajectory = None
+            if baseline_weeks:
+                b0 = weeks_list.index(baseline_weeks[0])
+                cohort_week_idxs = list(range(max(0, b0 - 4), b0))
+                if cohort_week_idxs:
+                    cnt = df[df['week_idx'].isin(cohort_week_idxs)].groupby('Discord ID').size()
+                    regulars = set(cnt[cnt >= 2].index)
+                    grp_p = regulars & participant_ids
+                    grp_o = regulars - participant_ids
+                    out_idxs = list(range(b0, len(weeks_list)))
+                    sub = df[df['week_idx'].isin(out_idxs) & df['Discord ID'].isin(regulars)]
+                    n_base = len(baseline_weeks)
+
+                    def traj(group):
+                        if not group:
+                            return None
+                        g = sub[sub['Discord ID'].isin(group)]
+                        by = g.groupby('week_idx')['Weekly Messages'].agg(['size', 'sum'])
+                        act = [100.0 * float(by['size'].get(i, 0)) / len(group) for i in out_idxs]
+                        mpp = [float(by['sum'].get(i, 0)) / len(group) for i in out_idxs]
+                        act_base = sum(act[:n_base]) / n_base
+                        mpp_base = sum(mpp[:n_base]) / n_base
+                        return {
+                            "n": len(group),
+                            "active_idx": [round(100 * a / act_base, 1) if act_base else None for a in act],
+                            "msgs_idx": [round(100 * m / mpp_base, 1) if mpp_base else None for m in mpp],
+                            "active_pct_baseline": round(act_base, 1),
+                            "msgs_per_person_baseline": round(mpp_base, 1),
+                        }
+
+                    tp, to = traj(grp_p), traj(grp_o)
+                    if tp and to:
+                        wk_list = [weeks_list[i] for i in out_idxs]
+                        chat_trajectory = {
+                            "cohort_weeks": [weeks_list[i].strftime('%Y-%m-%d') for i in cohort_week_idxs],
+                            "weeks": [w.strftime('%Y-%m-%d') for w in wk_list],
+                            "n_baseline_weeks": n_base,
+                            "in_event_window": [bool(w <= event_end and (w + pd.Timedelta(days=6)) >= event_start) for w in wk_list],
+                            "participants": tp,
+                            "others": to,
+                        }
+
+            community_events_out.append({
+                "event_id": int(first['event_id']),
+                "title": first['event_title'],
+                "start_date": event_start.strftime('%Y-%m-%d'),
+                "end_date": event_end.strftime('%Y-%m-%d'),
+                "n_participants": n_participants,
+                "pct_of_pre_event_active": round(100 * n_participants / anchor_active_users, 1) if anchor_active_users else None,
+                "dormancy_anchor_week": anchor_week.strftime('%Y-%m-%d') if anchor_week is not None else None,
+                "no_prior_now_chatting_n": no_prior_now_chatting_n,
+                "chat_after": chat_after,
+                "in_server_n": in_server_n,
+                "in_server_pct": round(100 * in_server_n / n_participants, 1) if (n_participants and in_server_reliable) else None,
+                "in_server_data_reliable": in_server_reliable,
+                "tier_breakdown": tier_breakdown,
+                "score_hist": score_hist,
+                "n_matched_to_cohort": n_matched,
+                "n_unmatched_no_message_history": n_no_prior,
+                "pct_no_message_history": round(100 * n_no_prior / n_participants, 1) if n_participants else 0,
+                "participant_level_dist": participant_level_dist,
+                "population_level_dist": pop_level_dist,
+                "participant_verified_pct": participant_verified_pct,
+                "population_verified_pct": pop_verified_pct,
+                "participant_alpha_pct": participant_alpha_pct,
+                "population_alpha_pct": pop_alpha_pct,
+                "participant_creator_pct": participant_creator_pct,
+                "population_creator_pct": pop_creator_pct,
+                "baseline_weeks": [w.strftime('%Y-%m-%d') for w in baseline_weeks],
+                "participant_baseline_avg_msgs": participant_baseline_avg,
+                "participant_baseline_median_msgs": participant_baseline_median,
+                "population_baseline_avg_msgs": pop_baseline_avg,
+                "population_baseline_median_msgs": pop_baseline_median,
+                "reactivation_breakdown": reactivation_breakdown,
+                "winback_n": winback_n,
+                "winback_pct_of_participants": round(100 * winback_n / n_participants, 1) if n_participants else 0,
+                "winback_in_server_n": winback_in_server_n,
+                "post_event_retention": post_event_retention,
+                "chat_trajectory": chat_trajectory
+            })
+
+        # Flag events whose dates overlap with another tracked event, so any
+        # before/after read can say so (overlapping events can't be separated).
+        for a in community_events_out:
+            a["overlaps_events"] = [
+                b["title"] for b in community_events_out
+                if b is not a and a["start_date"] <= b["end_date"] and b["start_date"] <= a["end_date"]
+            ]
+
     output = {
         "meta": {
             "total_rows": len(df),
@@ -649,8 +1180,15 @@ def main(csv_paths, corrections_path=None, membership_csv_path=None, current_mem
         "membership_churn": membership_churn,
         "level_launch_tracking": level_launch_tracking,
         "level_launch_success": level_launch_success,
-        "events": events_out
+        "events": events_out,
+        "community_events": community_events_out
     }
+    if members_chart_path:
+        mdf = pd.read_csv(members_chart_path)
+        mdf['week'] = pd.to_datetime(mdf['timestamp']).dt.strftime('%Y-%m-%d')
+        mdf = mdf.dropna(subset=['members']).sort_values('week').drop_duplicates('week', keep='last')
+        output["members_series"] = [{"week": w, "members": int(m)} for w, m in zip(mdf['week'], mdf['members'])]
+    output["kpis"] = build_kpis(output, df)
 
     with open('data.json', 'w') as f:
         json.dump(output, f)
@@ -670,12 +1208,28 @@ if __name__ == '__main__':
             return val, args[:idx] + args[idx + 2:]
         return None, args
 
+    def pop_multi_flag(flag, args):
+        # Collects every value after `flag` up to the next `--`-prefixed flag
+        # (or end of args), so multiple event CSVs can be passed in one go.
+        if flag in args:
+            idx = args.index(flag)
+            vals = []
+            j = idx + 1
+            while j < len(args) and not args[j].startswith('--'):
+                vals.append(args[j])
+                j += 1
+            return vals, args[:idx] + args[j:]
+        return [], args
+
     corrections_arg, args = pop_flag('--corrections', args)
     membership_csv_arg, args = pop_flag('--membership-csv', args)
     current_members_arg, args = pop_flag('--current-members', args)
     events_csv_arg, args = pop_flag('--events-csv', args)
+    members_chart_arg, args = pop_flag('--members-chart', args)
+    community_events_arg, args = pop_multi_flag('--community-events', args)
     current_members_arg = int(current_members_arg) if current_members_arg else None
 
     main(args, corrections_path=corrections_arg,
          membership_csv_path=membership_csv_arg, current_members=current_members_arg,
-         events_csv_path=events_csv_arg)
+         events_csv_path=events_csv_arg, community_event_paths=community_events_arg,
+         members_chart_path=members_chart_arg)
